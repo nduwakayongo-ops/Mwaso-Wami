@@ -1,22 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
-    android:viewportWidth="48"
-    android:viewportHeight="48">
-    <!-- Circle background -->
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <!-- Outer Dark Amber Glow Ring -->
     <path
-        android:fillColor="#E5A93C"
-        android:pathData="M24,24m-22,0a22,22 0,1,1 44,0a22,22 0,1,1 -44,0" />
-    <!-- Inner emblem -->
+        android:pathData="M32,32m-30,0a30,30 0,1,1 60,0a30,30 0,1,1 -60,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="64"
+                android:endY="64"
+                android:type="linear">
+                <item android:color="#2E2012" android:offset="0.0" />
+                <item android:color="#140E08" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Vinyl Grooves / Subtle Radial Rings -->
     <path
-        android:fillColor="#15100B"
-        android:pathData="M24,24m-19,0a19,19 0,1,1 38,0a19,19 0,1,1 -38,0" />
-    <!-- Soundwave & Musical note -->
+        android:pathData="M32,8 A24,24 0 1,0 32,56 A24,24 0 1,0 32,8"
+        android:strokeColor="#3A2814"
+        android:strokeWidth="1.2" />
     <path
-        android:fillColor="#E5A93C"
-        android:pathData="M27,16 L27,27.5 C25.8,26.6 24.2,26 22.5,26 C18.9,26 16,28.9 16,32.5 C16,36.1 18.9,39 22.5,39 C26.1,39 29,36.1 29,32.5 L29,21 L35,21 L35,16 L27,16 Z" />
+        android:pathData="M32,14 A18,18 0 1,0 32,50 A18,18 0 1,0 32,14"
+        android:strokeColor="#4A3418"
+        android:strokeWidth="1.2" />
+
+    <!-- Center Core Disc -->
     <path
-        android:fillColor="#D85A38"
-        android:pathData="M11,28 A2,2 0 0,1 11,32 L11,28 Z" />
+        android:pathData="M32,32m-13,0a13,13 0,1,1 26,0a13,13 0,1,1 -26,0"
+        android:fillColor="#0D0A07" />
+
+    <!-- Stylized Modern Gold Musical Note & Sound Waves -->
+    <path
+        android:pathData="M37,18 L37,36.8 C35.4,35.7 33.3,35 31,35 C26,35 22,38.8 22,43.5 C22,48.2 26,52 31,52 C36,52 40,48.2 40,43.5 L40,24.5 L47,24.5 L47,18 L37,18 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="22"
+                android:startY="18"
+                android:endX="47"
+                android:endY="52"
+                android:type="linear">
+                <item android:color="#FFD56B" android:offset="0.0" />
+                <item android:color="#E5A93C" android:offset="0.5" />
+                <item android:color="#D85A38" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Equalizer Dynamic Sound Bar 1 -->
+    <path
+        android:pathData="M16,28 L16,36"
+        android:strokeColor="#E5A93C"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.5" />
+
+    <!-- Equalizer Dynamic Sound Bar 2 -->
+    <path
+        android:pathData="M12,31 L12,33"
+        android:strokeColor="#D85A38"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+
+    <!-- Equalizer Dynamic Sound Bar 3 -->
+    <path
+        android:pathData="M51,29 L51,35"
+        android:strokeColor="#FFD56B"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.5" />
 </vector>

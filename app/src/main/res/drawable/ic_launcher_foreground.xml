@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_mwaso_logo"
+        android:drawable="@drawable/mwaso_launcher_fg_1788168148655"
         android:gravity="center" />
 </layer-list>

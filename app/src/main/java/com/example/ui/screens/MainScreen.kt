@@ -163,7 +163,8 @@ fun MainScreen(
                 when (selectedTab) {
                     0 -> AudioLibraryScreen(
                         tracks = tracks,
-                        playbackState = playbackState,
+                        currentTrackId = playbackState.currentTrack?.id,
+                        isPlaying = playbackState.isPlaying,
                         selectedSortOrder = selectedSortOrder,
                         searchQuery = searchQuery,
                         isScanning = isScanning,

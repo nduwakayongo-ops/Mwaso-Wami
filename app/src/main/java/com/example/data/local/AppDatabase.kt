@@ -62,6 +62,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "mwaso_wami_database"
                 )
                     .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigration()
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                 INSTANCE = instance

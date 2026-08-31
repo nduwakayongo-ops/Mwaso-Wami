@@ -64,7 +64,8 @@ import com.example.ui.theme.TerracottaAccent
 @Composable
 fun AudioLibraryScreen(
     tracks: List<AudioTrack>,
-    playbackState: PlaybackState,
+    currentTrackId: Long?,
+    isPlaying: Boolean,
     selectedSortOrder: SortOrder,
     searchQuery: String,
     isScanning: Boolean,
@@ -303,11 +304,11 @@ fun AudioLibraryScreen(
                 contentPadding = PaddingValues(bottom = 120.dp)
             ) {
                 items(tracks, key = { it.id }, contentType = { "audio_track" }) { track ->
-                    val isCurrent = playbackState.currentTrack?.id == track.id
+                    val isCurrent = currentTrackId == track.id
                     AudioTrackItem(
                         track = track,
                         isCurrentTrack = isCurrent,
-                        isPlaying = isCurrent && playbackState.isPlaying,
+                        isPlaying = isCurrent && isPlaying,
                         onTrackClick = { onTrackClick(track, tracks) },
                         onToggleFavorite = { onToggleFavorite(track) },
                         onPlayNext = { onPlayNext(track) },

@@ -142,13 +142,9 @@ class PlaybackController private constructor(private val context: Context) {
     private fun startMediaService() {
         try {
             val intent = Intent(context, MediaPlaybackService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startService(intent)
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Unable to start foreground service: ${e.message}")
+            Log.w("PlaybackController", "Unable to start media service: ${e.message}")
         }
     }
 
