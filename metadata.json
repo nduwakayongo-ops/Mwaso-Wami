@@ -1,0 +1,6 @@
+{
+  "name": "Mwaso Wami",
+  "description": "Reprodutor multimédia avançado de áudio e vídeo em Côkwe com ganho digital até 300%, equalizador e transição antecipada. Desenvolvido por Nduwa Kayongo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

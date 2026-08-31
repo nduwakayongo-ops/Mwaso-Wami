@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Circle background -->
+    <path
+        android:fillColor="#E5A93C"
+        android:pathData="M24,24m-22,0a22,22 0,1,1 44,0a22,22 0,1,1 -44,0" />
+    <!-- Inner emblem -->
+    <path
+        android:fillColor="#15100B"
+        android:pathData="M24,24m-19,0a19,19 0,1,1 38,0a19,19 0,1,1 -38,0" />
+    <!-- Soundwave & Musical note -->
+    <path
+        android:fillColor="#E5A93C"
+        android:pathData="M27,16 L27,27.5 C25.8,26.6 24.2,26 22.5,26 C18.9,26 16,28.9 16,32.5 C16,36.1 18.9,39 22.5,39 C26.1,39 29,36.1 29,32.5 L29,21 L35,21 L35,16 L27,16 Z" />
+    <path
+        android:fillColor="#D85A38"
+        android:pathData="M11,28 A2,2 0 0,1 11,32 L11,28 Z" />
+</vector>
