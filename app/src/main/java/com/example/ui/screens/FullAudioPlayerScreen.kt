@@ -19,29 +19,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,25 +50,26 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AudioTrack
 import com.example.data.model.PlaybackState
 import com.example.data.model.RepeatMode
-import com.example.ui.components.FrequencyVisualizerBars
-import com.example.ui.components.RotatingVinylCover
-import com.example.ui.components.SoundWavesGlow
-import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.CrimsonAccent
-import com.example.ui.theme.GoldAccent
-import com.example.ui.theme.ObsidianDark
-import com.example.ui.theme.TerracottaAccent
+import com.example.service.audio.RealtimeAudioState
+import com.example.ui.components.RealtimeCoverWithAudioWaves
+import com.example.ui.components.RealtimeWaveformProgressBar
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val ColorNeonGreen = Color(0xFF22C55E)
+private val ColorMagenta = Color(0xFFD946EF)
+private val ColorCrimson = Color(0xFFEF4444)
+private val BackgroundPitchBlack = Color(0xFF070709)
+
 @Composable
 fun FullAudioPlayerScreen(
     playbackState: PlaybackState,
+    audioState: RealtimeAudioState,
     economyMode: Boolean,
     sleepTimerRemainingSec: Int?,
     onClose: () -> Unit,
@@ -83,21 +82,18 @@ fun FullAudioPlayerScreen(
     onToggleFavorite: (AudioTrack) -> Unit,
     onOpenSleepTimer: () -> Unit,
     onShowInfo: (AudioTrack) -> Unit,
+    onOpenQueueTab: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val track = playbackState.currentTrack ?: return
-    var isDraggingSlider by remember { mutableStateOf(false) }
-    var sliderPosition by remember { mutableFloatStateOf(0f) }
+    var selectedTopTab by remember { mutableIntStateOf(0) } // 0: Tocando, 1: Fila
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(ObsidianDark)
+            .background(BackgroundPitchBlack)
             .testTag("full_audio_player_screen")
     ) {
-        // Soundwaves background glow
-        SoundWavesGlow(isPlaying = playbackState.isPlaying && !economyMode)
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -106,17 +102,22 @@ fun FullAudioPlayerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top Bar
+            // ----------------------------------------------------
+            // 1. Top Bar: Back Chevron, "Tocando" & "Fila" Tabs, 3-dots Menu
+            // ----------------------------------------------------
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 8.dp),
+                    .padding(top = 16.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Back / Minimize Button
                 IconButton(
                     onClick = onClose,
-                    modifier = Modifier.testTag("close_full_player_button")
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag("close_full_player_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
@@ -126,154 +127,177 @@ fun FullAudioPlayerScreen(
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "A TOCAR AGORA",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp,
-                            fontSize = 12.sp
-                        ),
-                        color = GoldAccent
-                    )
-                    Text(
-                        text = track.album,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 11.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Centered Tabs: "Tocando" & "Fila" (matching screenshot)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    // Tocando Tab
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clickable { selectedTopTab = 0 }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Tocando",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = if (selectedTopTab == 0) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 15.sp,
+                                color = if (selectedTopTab == 0) Color.White else Color.White.copy(alpha = 0.5f)
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        if (selectedTopTab == 0) {
+                            Box(
+                                modifier = Modifier
+                                    .width(28.dp)
+                                    .height(2.5.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(ColorMagenta, Color(0xFFA855F7))
+                                        )
+                                    )
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(2.5.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Fila Tab
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clickable {
+                                selectedTopTab = 1
+                                onOpenQueueTab()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Fila",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = if (selectedTopTab == 1) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 15.sp,
+                                color = if (selectedTopTab == 1) Color.White else Color.White.copy(alpha = 0.5f)
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        if (selectedTopTab == 1) {
+                            Box(
+                                modifier = Modifier
+                                    .width(24.dp)
+                                    .height(2.5.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(ColorMagenta)
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(2.5.dp))
+                        }
+                    }
                 }
 
+                // 3-dots Menu Button
                 IconButton(
                     onClick = { onShowInfo(track) },
-                    modifier = Modifier.testTag("full_player_info_button")
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag("full_player_info_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Detalhes da Faixa",
-                        tint = Color.White
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Opções",
+                        tint = Color.White.copy(alpha = 0.9f)
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // ----------------------------------------------------
+            // 2. Real-Time Dynamic Soundwaves & Album Cover Visualizer
+            // ----------------------------------------------------
+            RealtimeCoverWithAudioWaves(
+                artworkUri = track.artworkUri,
+                audioState = audioState,
+                isPlaying = playbackState.isPlaying,
+                economyMode = economyMode,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Animated Rotating Vinyl Disc with pulsating musical wave rings & frequency sparks
-            RotatingVinylCover(
-                artworkUri = track.artworkUri,
-                isPlaying = playbackState.isPlaying,
-                economyMode = economyMode,
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .padding(vertical = 8.dp)
-            )
-
-            // Animated Visualizer Frequency Bars
-            FrequencyVisualizerBars(
-                isPlaying = playbackState.isPlaying,
-                economyMode = economyMode,
-                modifier = Modifier.padding(vertical = 6.dp)
-            )
-
-            // Title & Artist with Favorite Button
-            Row(
+            // ----------------------------------------------------
+            // 3. Track Title, Artist, Album Collection Details
+            // ----------------------------------------------------
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        ),
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "${track.artist} • ${track.genre}",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 14.sp,
-                            color = AmberPrimary
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                IconButton(
-                    onClick = { onToggleFavorite(track) },
-                    modifier = Modifier.testTag("full_player_fav_button")
-                ) {
-                    Icon(
-                        imageVector = if (track.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = if (track.isFavorite) "Favorito" else "Marcar como Favorito",
-                        tint = if (track.isFavorite) CrimsonAccent else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-
-            // Timeline Seekbar & Timestamps
-            Column(modifier = Modifier.fillMaxWidth()) {
-                val currentSliderValue = if (isDraggingSlider) sliderPosition else playbackState.progress
-                Slider(
-                    value = currentSliderValue,
-                    onValueChange = {
-                        isDraggingSlider = true
-                        sliderPosition = it
-                    },
-                    onValueChangeFinished = {
-                        val newPos = (sliderPosition * playbackState.durationMs).toLong()
-                        onSeekTo(newPos)
-                        isDraggingSlider = false
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = GoldAccent,
-                        activeTrackColor = AmberPrimary,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("player_timeline_slider")
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = if (isDraggingSlider) {
-                            val dragPos = (sliderPosition * playbackState.durationMs).toLong()
-                            val sec = dragPos / 1000
-                            String.format("%d:%02d", sec / 60, sec % 60)
-                        } else playbackState.formattedCurrentPosition,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-                    )
-                    Text(
-                        text = playbackState.formattedDuration,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-                    )
-                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = track.artist.ifBlank { "Artista Desconhecido" },
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                        color = Color.White.copy(alpha = 0.7f)
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = track.album.ifBlank { "Coleção de Áudios" },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.45f)
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Primary Playback Controls: Shuffle, Previous, Play/Pause, Next, Repeat
+            // ----------------------------------------------------
+            // 4. Real-Time Waveform Equalizer Seeker / Progress Bar
+            // ----------------------------------------------------
+            RealtimeWaveformProgressBar(
+                progress = playbackState.progress,
+                durationMs = playbackState.durationMs,
+                currentPositionMs = playbackState.currentPositionMs,
+                formattedCurrent = playbackState.formattedCurrentPosition,
+                formattedDuration = playbackState.formattedDuration,
+                audioState = audioState,
+                isPlaying = playbackState.isPlaying,
+                onSeekTo = onSeekTo,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // ----------------------------------------------------
+            // 5. Playback Controls: Shuffle, Previous, Play/Pause, Next, Repeat
+            // ----------------------------------------------------
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -289,7 +313,7 @@ fun FullAudioPlayerScreen(
                     Icon(
                         imageVector = Icons.Default.Shuffle,
                         contentDescription = "Aleatório",
-                        tint = if (playbackState.isShuffle) GoldAccent else Color.White.copy(alpha = 0.4f),
+                        tint = if (playbackState.isShuffle) ColorNeonGreen else Color.White.copy(alpha = 0.4f),
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -307,18 +331,18 @@ fun FullAudioPlayerScreen(
                     )
                 }
 
-                // Big Play/Pause Button
+                // Large Glowing Play/Pause Button (Spotify Green Circle style from screenshot)
                 Box(
                     modifier = Modifier
-                        .size(68.dp)
+                        .size(72.dp)
                         .clip(CircleShape)
-                        .shadow(16.dp, CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(AmberPrimary, TerracottaAccent)
-                            )
+                        .shadow(
+                            elevation = if (playbackState.isPlaying) 18.dp else 8.dp,
+                            shape = CircleShape,
+                            spotColor = ColorNeonGreen
                         )
-                        .border(2.dp, GoldAccent.copy(alpha = 0.6f), CircleShape)
+                        .background(Color(0xFF131F17))
+                        .border(2.5.dp, ColorNeonGreen, CircleShape)
                         .clickable { onTogglePlayPause() }
                         .testTag("full_player_play_pause_button"),
                     contentAlignment = Alignment.Center
@@ -326,8 +350,8 @@ fun FullAudioPlayerScreen(
                     Icon(
                         imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproduzir",
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp)
+                        tint = ColorNeonGreen,
+                        modifier = Modifier.size(40.dp)
                     )
                 }
 
@@ -355,7 +379,7 @@ fun FullAudioPlayerScreen(
                     }
                     val tint = when (playbackState.repeatMode) {
                         RepeatMode.OFF -> Color.White.copy(alpha = 0.4f)
-                        RepeatMode.ALL, RepeatMode.ONE -> GoldAccent
+                        RepeatMode.ALL, RepeatMode.ONE -> ColorNeonGreen
                     }
                     Icon(
                         imageVector = icon,
@@ -366,48 +390,72 @@ fun FullAudioPlayerScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Quick Action: Sleep Timer
+            // ----------------------------------------------------
+            // 6. Bottom Utility Actions (Heart, Queue, Cast, Playlist)
+            // ----------------------------------------------------
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White.copy(alpha = 0.06f))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onOpenSleepTimer() }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .testTag("quick_timer_button"),
-                    verticalAlignment = Alignment.CenterVertically
+                // Favorite Button
+                IconButton(
+                    onClick = { onToggleFavorite(track) },
+                    modifier = Modifier.testTag("full_player_fav_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Timer,
-                        contentDescription = "Temporizador de Suspensão",
-                        tint = if (sleepTimerRemainingSec != null) GoldAccent else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(20.dp)
+                        imageVector = if (track.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (track.isFavorite) "Favorito" else "Marcar como Favorito",
+                        tint = if (track.isFavorite) ColorCrimson else Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (sleepTimerRemainingSec != null) {
-                            val m = sleepTimerRemainingSec / 60
-                            val s = sleepTimerRemainingSec % 60
-                            "Temporizador: ${String.format("%02d:%02d", m, s)}"
-                        } else "Temporizador de Suspensão",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = if (sleepTimerRemainingSec != null) GoldAccent else Color.White
-                        )
+                }
+
+                // Queue Button
+                IconButton(
+                    onClick = onOpenQueueTab,
+                    modifier = Modifier.testTag("full_player_queue_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QueueMusic,
+                        contentDescription = "Fila",
+                        tint = Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                // Cast / Output Device Button
+                IconButton(
+                    onClick = onOpenSleepTimer,
+                    modifier = Modifier.testTag("full_player_cast_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Cast,
+                        contentDescription = "Dispositivos / Temporizador",
+                        tint = if (sleepTimerRemainingSec != null) ColorNeonGreen else Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                // Track Details / Playlist Button
+                IconButton(
+                    onClick = { onShowInfo(track) },
+                    modifier = Modifier.testTag("full_player_details_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FormatListBulleted,
+                        contentDescription = "Mais opções",
+                        tint = Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

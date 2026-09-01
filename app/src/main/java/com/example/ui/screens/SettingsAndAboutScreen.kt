@@ -42,6 +42,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -153,6 +155,88 @@ fun SettingsAndAboutScreen(
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.testTag("crossfade_${sec}s")
                         )
+                    }
+                }
+
+                // Live Acoustic & Hardware Diagnostic Telemetry (Proof of Real PCM A + B)
+                val playerATelemetry by com.example.service.audio.DjAudioMixerMonitor.playerAPcm.collectAsStateWithLifecycle()
+                val playerBTelemetry by com.example.service.audio.DjAudioMixerMonitor.playerBPcm.collectAsStateWithLifecycle()
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF0F172A))
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "MONITOR ACÚSTICO PCM (HARDWARE EM TEMPO REAL)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = EmeraldAccent
+                                )
+                            )
+                            if (playerATelemetry.isReceivingRealPcm && playerBTelemetry.isReceivingRealPcm) {
+                                Text(
+                                    text = "● SIMULTÂNEO (A+B)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFF59E0B)
+                                    )
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Player A status
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Faixa A (Principal):",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Color.White)
+                            )
+                            Text(
+                                text = if (playerATelemetry.isReceivingRealPcm)
+                                    "PCM Ativo | RMS: ${"%.3f".format(playerATelemetry.rms)} | Peak: ${"%.2f".format(playerATelemetry.peak)}"
+                                else "Em Espera / Inativo",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.sp,
+                                    color = if (playerATelemetry.isReceivingRealPcm) EmeraldAccent else Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+                        }
+
+                        // Player B status
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Faixa B (Crossfade DJ):",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Color.White)
+                            )
+                            Text(
+                                text = if (playerBTelemetry.isReceivingRealPcm)
+                                    "PCM Ativo | RMS: ${"%.3f".format(playerBTelemetry.rms)} | Peak: ${"%.2f".format(playerBTelemetry.peak)}"
+                                else "Em Espera / Inativo",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.sp,
+                                    color = if (playerBTelemetry.isReceivingRealPcm) GoldAccent else Color.White.copy(alpha = 0.5f)
+                                )
+                            )
+                        }
                     }
                 }
             }

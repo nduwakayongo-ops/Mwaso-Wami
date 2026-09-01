@@ -36,6 +36,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val mediaScanner = MediaScanner(application, database)
 
     val playbackState: StateFlow<PlaybackState> = playbackController.playbackState
+    val audioVisualizerState: StateFlow<com.example.service.audio.RealtimeAudioState> = playbackController.audioVisualizerState
     val appSettings: StateFlow<AppSettings> = playbackController.appSettings
     val sleepTimerRemainingSec: StateFlow<Int?> = playbackController.sleepTimerRemainingSec
 
@@ -143,6 +144,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() = playbackController.togglePlayPause()
+    fun stopPlayback() = playbackController.stopPlayback()
     fun seekTo(positionMs: Long) = playbackController.seekTo(positionMs)
     fun skipNext() = playbackController.skipNext()
     fun skipPrevious() = playbackController.skipPrevious()

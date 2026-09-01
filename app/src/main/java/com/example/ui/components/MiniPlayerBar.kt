@@ -50,15 +50,17 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
 import com.example.data.model.PlaybackState
+import com.example.service.audio.RealtimeAudioState
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.GoldAccent
-import com.example.ui.theme.ObsidianDark
-import com.example.ui.theme.SurfaceElevatedDark
 import com.example.ui.theme.TerracottaAccent
+
+private val ColorNeonGreen = Color(0xFF22C55E)
 
 @Composable
 fun MiniPlayerBar(
     playbackState: PlaybackState,
+    audioState: RealtimeAudioState,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onClick: () -> Unit,
@@ -82,7 +84,7 @@ fun MiniPlayerBar(
                 .clip(RoundedCornerShape(16.dp))
                 .border(
                     1.dp,
-                    Brush.horizontalGradient(listOf(AmberPrimary.copy(alpha = 0.5f), TerracottaAccent.copy(alpha = 0.3f))),
+                    Brush.horizontalGradient(listOf(AmberPrimary.copy(alpha = 0.5f), ColorNeonGreen.copy(alpha = 0.3f))),
                     RoundedCornerShape(16.dp)
                 )
                 .clickable { onClick() }
@@ -96,8 +98,8 @@ fun MiniPlayerBar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(2.5.dp),
-                    color = AmberPrimary,
-                    trackColor = AmberPrimary.copy(alpha = 0.2f),
+                    color = ColorNeonGreen,
+                    trackColor = ColorNeonGreen.copy(alpha = 0.2f),
                 )
 
                 Row(
@@ -137,9 +139,9 @@ fun MiniPlayerBar(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
-                    // Track Info
+                    // Track Info + Real-time Mini Frequency Bars
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.Center
@@ -154,36 +156,32 @@ fun MiniPlayerBar(
                             overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Text(
-                                text = track.artist,
+                                text = track.artist.ifBlank { "Artista Desconhecido" },
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 12.sp,
                                     color = AmberPrimary
                                 ),
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
-                            if (playbackState.digitalGainFactor > 1.0f) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(TerracottaAccent.copy(alpha = 0.3f))
-                                        .padding(horizontal = 4.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "${(playbackState.digitalGainFactor * 100).toInt()}%",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = GoldAccent
-                                        )
-                                    )
-                                }
-                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // Live Mini Equalizer Bars
+                            RealtimeMiniVisualizer(
+                                audioState = audioState,
+                                isPlaying = playbackState.isPlaying,
+                                modifier = Modifier.width(48.dp)
+                            )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     // Play/Pause Button
                     IconButton(
@@ -191,15 +189,14 @@ fun MiniPlayerBar(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(listOf(AmberPrimary, TerracottaAccent))
-                            )
+                            .background(Color(0xFF131F17))
+                            .border(1.5.dp, ColorNeonGreen, CircleShape)
                             .testTag("mini_player_play_pause_button")
                     ) {
                         Icon(
                             imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproduzir",
-                            tint = Color.White,
+                            tint = ColorNeonGreen,
                             modifier = Modifier.size(24.dp)
                         )
                     }

@@ -14,26 +14,55 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
+enum class CrossfadeState {
+    IDLE,
+    PREPARING_NEXT,
+    CROSSFADE_ACTIVE,
+    COMPLETED
+}
+
+/**
+ * DJ Crossfade Engine:
+ * Real equal-power audio crossfade between two simultaneous ExoPlayer instances
+ * during the last 5-8 seconds of a track.
+ *
+ * Guarantees:
+ * 1. Track 1 fades out (1.0 -> 0.0) while Track 2 starts ONCE at 00:00 and fades in (0.0 -> 1.0).
+ * 2. Track 2 NEVER receives seekTo(0) after starting.
+ * 3. On completion, old player is released and the secondary player is promoted seamlessly.
+ * 4. Repeat ONE, Repeat ALL, and Repeat OFF are fully supported.
+ */
 class AudioTransitionManager(
     private val context: Context,
     private val scope: CoroutineScope,
+    private val visualizerEngine: com.example.service.audio.RealtimeAudioVisualizerEngine? = null,
     private val onTransitionComplete: (promotedPlayer: ExoPlayer, nextTrack: AudioTrack, nextIndex: Int) -> Unit
 ) {
+    private val _crossfadeState = MutableStateFlow(CrossfadeState.IDLE)
+    val crossfadeState: StateFlow<CrossfadeState> = _crossfadeState.asStateFlow()
+
     private var crossfadeJob: Job? = null
     private var secondaryPlayer: ExoPlayer? = null
-    private var isCrossfading = false
-    private var crossfadeStarted = false
     private var currentTargetTrack: AudioTrack? = null
     private var currentTargetIndex: Int = -1
 
     val isCrossfadeActive: Boolean
-        get() = isCrossfading
+        get() = _crossfadeState.value == CrossfadeState.CROSSFADE_ACTIVE || _crossfadeState.value == CrossfadeState.PREPARING_NEXT
 
     val secondaryTrackId: Long?
         get() = currentTargetTrack?.id
 
+    /**
+     * Called by position ticker to evaluate and trigger the DJ crossfade.
+     */
     fun checkAndHandleEarlyTransition(
         primaryPlayer: ExoPlayer,
         currentPosMs: Long,
@@ -43,39 +72,51 @@ class AudioTransitionManager(
         currentIndex: Int,
         repeatMode: RepeatMode
     ) {
-        // Validation guards: Need valid duration and crossfade duration > 0 (OFF = 0)
-        if (durationMs <= 4000L || isCrossfading || crossfadeStarted) return
-        if (crossfadeSec <= 0) return // Crossfade is OFF
+        // Only trigger when crossfade is configured (5s, 6s, 7s, 8s) and currently IDLE
+        if (crossfadeSec <= 0) return
+        if (_crossfadeState.value != CrossfadeState.IDLE) return
+        if (!primaryPlayer.isPlaying) return
 
-        val remainingMs = durationMs - currentPosMs
-        val crossfadeMs = crossfadeSec * 1000L
+        val currentTrack = currentQueue.getOrNull(currentIndex) ?: return
+        val currentDurationMs = if (durationMs > 0 && durationMs != C.TIME_UNSET) durationMs else currentTrack.durationMs
+        if (currentDurationMs <= 2000L) return
 
-        // Trigger when remaining time enters the crossfade window
-        if (remainingMs in 1..crossfadeMs) {
-            val nextIndex = when {
-                repeatMode == RepeatMode.ONE -> currentIndex
-                currentIndex + 1 < currentQueue.size -> currentIndex + 1
-                repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty() -> 0
-                else -> -1
-            }
+        val nextIndex = when {
+            repeatMode == RepeatMode.ONE -> currentIndex
+            currentIndex + 1 < currentQueue.size -> currentIndex + 1
+            repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty() -> 0
+            else -> -1
+        }
 
-            if (nextIndex in currentQueue.indices) {
-                val currentTrack = currentQueue.getOrNull(currentIndex)
-                val nextTrack = currentQueue[nextIndex]
+        if (nextIndex !in currentQueue.indices) return
+        val nextTrack = currentQueue[nextIndex]
+        val nextDurationMs = if (nextTrack.durationMs > 0) nextTrack.durationMs else currentDurationMs
 
-                Log.d("AudioTransitionManager", "[CROSSFADE] remaining=${remainingMs}ms")
-                Log.d("AudioTransitionManager", "[CROSSFADE] Current track: ${currentTrack?.title} -> Next track: ${nextTrack.title}")
+        // Short track protection: effectiveCrossfade = min(configuredCrossfade, durationCurrent / 2, durationNext / 2)
+        val configuredCrossfadeMs = crossfadeSec * 1000L
+        val maxAllowedForTrack1 = currentDurationMs / 2
+        val maxAllowedForTrack2 = (if (nextDurationMs > 0) nextDurationMs else currentDurationMs) / 2
+        val effectiveCrossfadeMs = minOf(configuredCrossfadeMs, maxAllowedForTrack1, maxAllowedForTrack2).coerceAtLeast(1000L)
 
-                startDjCrossfade(
-                    primaryPlayer = primaryPlayer,
-                    nextTrack = nextTrack,
-                    nextIndex = nextIndex,
-                    crossfadeMs = remainingMs.coerceAtLeast(1000L)
-                )
-            }
+        val remainingMs = currentDurationMs - currentPosMs
+
+        // Check if within the crossfade window
+        if (remainingMs in 1..effectiveCrossfadeMs) {
+            Log.d("AudioTransitionManager", "[CROSSFADE DJ] Triggered! Remaining=${remainingMs}ms, window=${effectiveCrossfadeMs}ms")
+            Log.d("AudioTransitionManager", "[CROSSFADE DJ] Track 1: '${currentTrack.title}' -> Track 2: '${nextTrack.title}'")
+
+            startDjCrossfade(
+                primaryPlayer = primaryPlayer,
+                nextTrack = nextTrack,
+                nextIndex = nextIndex,
+                crossfadeDurationMs = remainingMs.coerceAtLeast(1000L)
+            )
         }
     }
 
+    /**
+     * Manual user skip with crossfade if configured.
+     */
     fun startManualTransition(
         primaryPlayer: ExoPlayer,
         nextTrack: AudioTrack,
@@ -84,25 +125,26 @@ class AudioTransitionManager(
     ): Boolean {
         if (crossfadeSec <= 0) {
             resetTransition(primaryPlayer)
-            return false // Crossfade is OFF, perform instant switch
+            return false
         }
 
-        // If the secondary player is ALREADY playing this exact track (from early transition), promote immediately!
-        if (isCrossfading && secondaryPlayer != null && currentTargetTrack?.id == nextTrack.id) {
-            Log.d("AudioTransitionManager", "[CROSSFADE] Promoting existing secondaryPlayer for track: ${nextTrack.title}")
+        // If secondary player is already crossfading into this exact track, promote immediately!
+        if (isCrossfadeActive && secondaryPlayer != null && currentTargetTrack?.id == nextTrack.id) {
+            Log.d("AudioTransitionManager", "[CROSSFADE DJ] Promoting existing secondary player for '${nextTrack.title}'")
             promoteSecondaryPlayerImmediately(primaryPlayer, nextTrack, nextIndex)
             return true
         }
 
-        // Otherwise, start a smooth manual crossfade with a comfortable duration
-        val crossfadeMs = (crossfadeSec * 1000L).coerceIn(1500L, 4000L)
-        Log.d("AudioTransitionManager", "[CROSSFADE] Starting manual crossfade to: ${nextTrack.title} over ${crossfadeMs}ms")
+        val configuredMs = crossfadeSec * 1000L
+        val maxAllowedForNext = if (nextTrack.durationMs > 2000L) nextTrack.durationMs / 2 else configuredMs
+        val crossfadeDurationMs = minOf(configuredMs, maxAllowedForNext).coerceAtLeast(1000L)
+        Log.d("AudioTransitionManager", "[CROSSFADE DJ] Starting manual crossfade to '${nextTrack.title}' over ${crossfadeDurationMs}ms")
 
         startDjCrossfade(
             primaryPlayer = primaryPlayer,
             nextTrack = nextTrack,
             nextIndex = nextIndex,
-            crossfadeMs = crossfadeMs
+            crossfadeDurationMs = crossfadeDurationMs
         )
         return true
     }
@@ -111,26 +153,42 @@ class AudioTransitionManager(
         primaryPlayer: ExoPlayer,
         nextTrack: AudioTrack,
         nextIndex: Int,
-        crossfadeMs: Long
+        crossfadeDurationMs: Long
     ) {
-        crossfadeStarted = true
-        isCrossfading = true
+        _crossfadeState.value = CrossfadeState.PREPARING_NEXT
         currentTargetTrack = nextTrack
         currentTargetIndex = nextIndex
         crossfadeJob?.cancel()
 
         try {
-            // Clean up any stale secondary player if exists
+            // Clean up any lingering secondary player
             releaseSecondaryPlayer()
 
-            // 1. Create Secondary ExoPlayer instance
-            val nextPlayer = ExoPlayer.Builder(context)
+            // 1. Create Secondary ExoPlayer instance with dedicated AudioProcessor instance (Tagged PLAYER_B)
+            val builder = if (visualizerEngine != null) {
+                val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
+                    override fun buildAudioSink(
+                        context: Context,
+                        enableFloatOutput: Boolean,
+                        enableAudioTrackPlaybackParams: Boolean
+                    ): androidx.media3.exoplayer.audio.AudioSink {
+                        return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                            .setAudioProcessors(arrayOf(com.example.service.audio.RealtimeAudioProcessor(visualizerEngine, playerTag = "PLAYER_B")))
+                            .build()
+                    }
+                }
+                ExoPlayer.Builder(context, renderersFactory)
+            } else {
+                ExoPlayer.Builder(context)
+            }
+
+            val nextPlayer = builder
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                         .setUsage(C.USAGE_MEDIA)
                         .build(),
-                    false // Don't steal audio focus from primary
+                    false // Don't steal audio focus from primary during simultaneous mix
                 )
                 .setWakeMode(C.WAKE_MODE_LOCAL)
                 .build()
@@ -143,42 +201,51 @@ class AudioTransitionManager(
                         .setTitle(nextTrack.title)
                         .setArtist(nextTrack.artist)
                         .setAlbumTitle(nextTrack.album)
+                        .setArtworkUri(nextTrack.artworkUri?.let { Uri.parse(it) })
                         .build()
                 )
                 .build()
 
-            // 2. Prepare & start secondary player at 0.0f volume
+            // 2. Prepare & start secondary player at 0.0f volume (starts at 00:00 ONCE)
             nextPlayer.setMediaItem(mediaItem)
             nextPlayer.volume = 0.0f
             nextPlayer.prepare()
+            nextPlayer.seekTo(0L) // Start at 00:00 exactly once
+            nextPlayer.playWhenReady = true
             nextPlayer.play()
             secondaryPlayer = nextPlayer
 
-            Log.d("AudioTransitionManager", "[CROSSFADE] secondaryPlayer START")
-            Log.d("AudioTransitionManager", "[CROSSFADE] primaryVolume=1.00 secondaryVolume=0.00")
+            _crossfadeState.value = CrossfadeState.CROSSFADE_ACTIVE
 
-            // 3. Smooth simultaneous crossfade coroutine
+            Log.d(
+                "AudioTransitionManager",
+                "[CROSSFADE_STARTED] A position = ${primaryPlayer.currentPosition} ms | A duration = ${primaryPlayer.duration} ms | A volume = ${primaryPlayer.volume} | B position = ${nextPlayer.currentPosition} ms | B volume = ${nextPlayer.volume} | A.isPlaying = ${primaryPlayer.isPlaying} | B.isPlaying = ${nextPlayer.isPlaying}"
+            )
+
+            // 3. Smooth simultaneous crossfade coroutine (Equal-Power DJ curve)
             crossfadeJob = scope.launch(Dispatchers.Main) {
                 val startTime = System.currentTimeMillis()
-                val stepIntervalMs = 40L
-                var lastLogQuarter = 0
+                val stepIntervalMs = 25L
+                var lastLoggedSec = -1
 
-                while (isCrossfading) {
+                while (_crossfadeState.value == CrossfadeState.CROSSFADE_ACTIVE) {
                     val elapsed = System.currentTimeMillis() - startTime
-                    val progress = (elapsed.toFloat() / crossfadeMs).coerceIn(0f, 1f)
+                    val progress = (elapsed.toFloat() / crossfadeDurationMs).coerceIn(0f, 1f)
 
-                    // Smooth-step curve: t * t * (3 - 2 * t) for natural transition
-                    val smooth = progress * progress * (3f - 2f * progress)
-                    val outgoingVolume = (1.0f - smooth).coerceIn(0.0f, 1.0f)
-                    val incomingVolume = smooth.coerceIn(0.0f, 1.0f)
+                    // Equal-power crossfade curve: cos/sin prevents volume dips in center
+                    val oldGain = cos(progress * PI / 2.0).toFloat().coerceIn(0f, 1f)
+                    val newGain = sin(progress * PI / 2.0).toFloat().coerceIn(0f, 1f)
 
-                    primaryPlayer.volume = outgoingVolume
-                    secondaryPlayer?.volume = incomingVolume
+                    primaryPlayer.volume = oldGain
+                    secondaryPlayer?.volume = newGain
 
-                    val currentQuarter = (progress * 4).toInt()
-                    if (currentQuarter > lastLogQuarter && currentQuarter in 1..3) {
-                        lastLogQuarter = currentQuarter
-                        Log.d("AudioTransitionManager", "[CROSSFADE] primaryVolume=${String.format("%.2f", outgoingVolume)} secondaryVolume=${String.format("%.2f", incomingVolume)}")
+                    val currentElapsedSec = (elapsed / 1000).toInt()
+                    if (currentElapsedSec != lastLoggedSec) {
+                        lastLoggedSec = currentElapsedSec
+                        Log.d(
+                            "AudioTransitionManager",
+                            "[CROSSFADE_PROGRESS +${elapsed}ms] A pos: ${primaryPlayer.currentPosition}ms (vol: ${"%.2f".format(oldGain)}) | B pos: ${secondaryPlayer?.currentPosition}ms (vol: ${"%.2f".format(newGain)}) | A.isPlaying: ${primaryPlayer.isPlaying} | B.isPlaying: ${secondaryPlayer?.isPlaying}"
+                        )
                     }
 
                     if (progress >= 1.0f) {
@@ -188,38 +255,29 @@ class AudioTransitionManager(
                 }
 
                 // 4. Crossfade completion & Player Promotion
-                Log.d("AudioTransitionManager", "[CROSSFADE] primaryVolume=0.00 secondaryVolume=1.00")
-                Log.d("AudioTransitionManager", "[CROSSFADE] transition COMPLETE")
-
-                // Stop and release old primary player
-                try {
-                    primaryPlayer.stop()
-                    primaryPlayer.release()
-                    Log.d("AudioTransitionManager", "[CROSSFADE] oldPlayer RELEASED")
-                } catch (e: Exception) {
-                    Log.w("AudioTransitionManager", "Error releasing old primary player: ${e.message}")
-                }
+                primaryPlayer.volume = 0.0f
 
                 val promotedPlayer = secondaryPlayer
                 if (promotedPlayer != null) {
                     promotedPlayer.volume = 1.0f
                     secondaryPlayer = null
-                    isCrossfading = false
-                    crossfadeStarted = false
+                    _crossfadeState.value = CrossfadeState.COMPLETED
                     currentTargetTrack = null
                     currentTargetIndex = -1
 
-                    // Promote the EXACT playing instance without restarting position!
+                    Log.d("AudioTransitionManager", "[CROSSFADE_COMPLETED] Promoting Track 2 at position ${promotedPlayer.currentPosition}ms. Track 1 released.")
+
+                    // Promote the playing instance without ANY seekTo(0) reset!
                     onTransitionComplete(promotedPlayer, nextTrack, nextIndex)
+                    _crossfadeState.value = CrossfadeState.IDLE
                 } else {
-                    isCrossfading = false
-                    crossfadeStarted = false
+                    _crossfadeState.value = CrossfadeState.IDLE
                     currentTargetTrack = null
                     currentTargetIndex = -1
                 }
             }
         } catch (e: Exception) {
-            Log.e("AudioTransitionManager", "Error starting DJ crossfade: ${e.message}", e)
+            Log.e("AudioTransitionManager", "Error in startDjCrossfade: ${e.message}", e)
             resetTransition(primaryPlayer)
         }
     }
@@ -234,22 +292,22 @@ class AudioTransitionManager(
 
         try {
             primaryPlayer.stop()
+            primaryPlayer.clearMediaItems()
             primaryPlayer.release()
-            Log.d("AudioTransitionManager", "[CROSSFADE] oldPlayer RELEASED immediately")
         } catch (e: Exception) {
-            Log.w("AudioTransitionManager", "Error releasing old player: ${e.message}")
+            Log.w("AudioTransitionManager", "Error releasing old primary player: ${e.message}")
         }
 
         val promotedPlayer = secondaryPlayer
         if (promotedPlayer != null) {
             promotedPlayer.volume = 1.0f
             secondaryPlayer = null
-            isCrossfading = false
-            crossfadeStarted = false
+            _crossfadeState.value = CrossfadeState.COMPLETED
             currentTargetTrack = null
             currentTargetIndex = -1
 
             onTransitionComplete(promotedPlayer, nextTrack, nextIndex)
+            _crossfadeState.value = CrossfadeState.IDLE
         } else {
             resetTransition(primaryPlayer)
         }
@@ -260,7 +318,7 @@ class AudioTransitionManager(
     }
 
     fun onResume() {
-        if (isCrossfading) {
+        if (isCrossfadeActive) {
             secondaryPlayer?.play()
         }
     }
@@ -269,8 +327,7 @@ class AudioTransitionManager(
         crossfadeJob?.cancel()
         crossfadeJob = null
         releaseSecondaryPlayer()
-        isCrossfading = false
-        crossfadeStarted = false
+        _crossfadeState.value = CrossfadeState.IDLE
         currentTargetTrack = null
         currentTargetIndex = -1
         primaryPlayer?.volume = 1.0f
@@ -279,6 +336,7 @@ class AudioTransitionManager(
     private fun releaseSecondaryPlayer() {
         try {
             secondaryPlayer?.stop()
+            secondaryPlayer?.clearMediaItems()
             secondaryPlayer?.release()
         } catch (e: Exception) {
             Log.w("AudioTransitionManager", "Error releasing secondary player: ${e.message}")

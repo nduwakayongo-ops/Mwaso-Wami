@@ -76,6 +76,7 @@ fun MainScreen(
     MyApplicationTheme(darkTheme = isDarkTheme) {
         val tracks by viewModel.tracks.collectAsState()
         val playbackState by viewModel.playbackState.collectAsState()
+        val audioState by viewModel.audioVisualizerState.collectAsState()
         val selectedSortOrder by viewModel.selectedSortOrder.collectAsState()
         val searchQuery by viewModel.searchQuery.collectAsState()
         val isScanning by viewModel.isScanning.collectAsState()
@@ -233,6 +234,7 @@ fun MainScreen(
                 if (!isFullPlayerOpen && selectedVideo == null) {
                     MiniPlayerBar(
                         playbackState = playbackState,
+                        audioState = audioState,
                         onTogglePlayPause = { viewModel.togglePlayPause() },
                         onSkipNext = { viewModel.skipNext() },
                         onClick = { viewModel.openFullPlayer() },
@@ -249,6 +251,7 @@ fun MainScreen(
                 ) {
                     FullAudioPlayerScreen(
                         playbackState = playbackState,
+                        audioState = audioState,
                         economyMode = appSettings.economyMode,
                         sleepTimerRemainingSec = sleepTimerRemainingSec,
                         onClose = { viewModel.closeFullPlayer() },
@@ -260,7 +263,11 @@ fun MainScreen(
                         onCycleRepeatMode = { viewModel.cycleRepeatMode() },
                         onToggleFavorite = { viewModel.toggleFavorite(it) },
                         onOpenSleepTimer = { viewModel.openSleepTimerDialog() },
-                        onShowInfo = { viewModel.showTrackDetails(it) }
+                        onShowInfo = { viewModel.showTrackDetails(it) },
+                        onOpenQueueTab = {
+                            viewModel.closeFullPlayer()
+                            selectedTab = 2
+                        }
                     )
                 }
 
