@@ -58,10 +58,21 @@ data class RealtimeAudioState(
  * Processes real decoded PCM audio buffers from ExoPlayer in real-time.
  */
 class RealtimeAudioVisualizerEngine {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     private val _audioState = MutableStateFlow(RealtimeAudioState())
     val audioState: StateFlow<RealtimeAudioState> = _audioState.asStateFlow()
+
+    @Volatile
+    private var isScreenVisible = true
+
+    fun setScreenVisible(visible: Boolean) {
+        isScreenVisible = visible
+        if (!visible) {
+            isPlaying = false
+        }
+    }
+
+    val hasSubscribers: Boolean
+        get() = isScreenVisible && _audioState.subscriptionCount.value > 0
 
     // Pre-allocated buffers for zero-garbage collection processing
     private val fftSize = 256
@@ -141,6 +152,13 @@ class RealtimeAudioVisualizerEngine {
         channelCount: Int,
         encoding: Int
     ) {
+        if (!hasSubscribers) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastEmitTimestamp < 33) {
+            return
+        }
+
         if (!isPlaying) {
             isPlaying = true
         }
@@ -152,40 +170,73 @@ class RealtimeAudioVisualizerEngine {
         var sumSquares = 0.0
         var sampleCount = 0
 
-        // Read 16-bit PCM samples
-        val shortBuffer = buffer.asShortBuffer()
-        val numShorts = shortBuffer.remaining()
+        try {
+            if (encoding == androidx.media3.common.C.ENCODING_PCM_FLOAT) {
+                val floatBuffer = buffer.asFloatBuffer()
+                val numFloats = floatBuffer.remaining()
+                if (numFloats <= 0) return
+                val maxFloats = minOf(numFloats, fftSize * channels)
+                val skip = numFloats - maxFloats
+                if (skip > 0) {
+                    floatBuffer.position(floatBuffer.position() + skip)
+                }
+                while (floatBuffer.hasRemaining()) {
+                    var monoSample = 0f
+                    var ch = 0
+                    while (ch < channels && floatBuffer.hasRemaining()) {
+                        val s = floatBuffer.get()
+                        if (s.isFinite()) {
+                            monoSample += s
+                        }
+                        ch++
+                    }
+                    if (ch > 0) monoSample /= ch
+                    val cleanSample = if (monoSample.isFinite()) monoSample.coerceIn(-1f, 1f) else 0f
+                    pcmRingBuffer[pcmRingIndex] = cleanSample
+                    pcmRingIndex = (pcmRingIndex + 1) % fftSize
+                    sumSquares += (cleanSample * cleanSample)
+                    sampleCount++
+                }
+            } else {
+                val shortBuffer = buffer.asShortBuffer()
+                val numShorts = shortBuffer.remaining()
+                if (numShorts <= 0) return
 
-        var i = 0
-        while (i < numShorts) {
-            // Mix down multi-channel to mono float [-1.0f, 1.0f]
-            var monoSample = 0f
-            for (c in 0 until channels) {
-                if (i < numShorts) {
-                    val s = shortBuffer.get(i)
-                    monoSample += (s / 32768.0f)
-                    i++
+                val maxShorts = minOf(numShorts, fftSize * channels)
+                val skip = numShorts - maxShorts
+                if (skip > 0) {
+                    shortBuffer.position(shortBuffer.position() + skip)
+                }
+
+                while (shortBuffer.hasRemaining()) {
+                    var monoSample = 0f
+                    var ch = 0
+                    while (ch < channels && shortBuffer.hasRemaining()) {
+                        monoSample += (shortBuffer.get() / 32768.0f)
+                        ch++
+                    }
+                    if (ch > 0) monoSample /= ch
+                    val cleanSample = if (monoSample.isFinite()) monoSample.coerceIn(-1f, 1f) else 0f
+
+                    pcmRingBuffer[pcmRingIndex] = cleanSample
+                    pcmRingIndex = (pcmRingIndex + 1) % fftSize
+
+                    sumSquares += (cleanSample * cleanSample)
+                    sampleCount++
                 }
             }
-            monoSample /= channels
-
-            // Push into PCM Ring Buffer for FFT and waveform extraction
-            pcmRingBuffer[pcmRingIndex] = monoSample
-            pcmRingIndex = (pcmRingIndex + 1) % fftSize
-
-            sumSquares += (monoSample * monoSample)
-            sampleCount++
+        } catch (e: Throwable) {
+            return
         }
 
         // Calculate instantaneous RMS Amplitude
-        val instantRms = if (sampleCount > 0) sqrt(sumSquares / sampleCount).toFloat().coerceIn(0f, 1f) else 0f
+        val instantRms = if (sampleCount > 0) {
+            val mean = sumSquares / sampleCount
+            if (mean.isFinite() && mean >= 0) sqrt(mean).toFloat().coerceIn(0f, 1f) else 0f
+        } else 0f
         smoothAmplitude = smoothAmplitude * 0.4f + instantRms * 0.6f
+        if (!smoothAmplitude.isFinite()) smoothAmplitude = 0f
 
-        // Throttle emission to ~50-60 Hz (every 18ms) to ensure smooth 60fps rendering without CPU waste
-        val now = System.currentTimeMillis()
-        if (now - lastEmitTimestamp < 18) {
-            return
-        }
         lastEmitTimestamp = now
 
         // 1. Extract Instantaneous Waveform (64 points sampled across the ring buffer)
@@ -310,13 +361,13 @@ class RealtimeAudioVisualizerEngine {
         _audioState.value = RealtimeAudioState(
             waveform = smoothWaveform.copyOf(),
             fftBands = smoothBands.copyOf(),
-            bassEnergy = smoothBass,
-            lowMidEnergy = lowMid,
-            midEnergy = smoothMid,
-            highMidEnergy = highMid,
-            trebleEnergy = smoothTreble,
-            overallAmplitude = smoothAmplitude,
-            beatPulse = currentBeatPulse,
+            bassEnergy = if (smoothBass.isFinite()) smoothBass.coerceIn(0f, 1f) else 0f,
+            lowMidEnergy = if (lowMid.isFinite()) lowMid.coerceIn(0f, 1f) else 0f,
+            midEnergy = if (smoothMid.isFinite()) smoothMid.coerceIn(0f, 1f) else 0f,
+            highMidEnergy = if (highMid.isFinite()) highMid.coerceIn(0f, 1f) else 0f,
+            trebleEnergy = if (smoothTreble.isFinite()) smoothTreble.coerceIn(0f, 1f) else 0f,
+            overallAmplitude = if (smoothAmplitude.isFinite()) smoothAmplitude.coerceIn(0f, 1f) else 0f,
+            beatPulse = if (currentBeatPulse.isFinite()) currentBeatPulse.coerceIn(0.5f, 2f) else 1.0f,
             isPlaying = isPlaying
         )
     }

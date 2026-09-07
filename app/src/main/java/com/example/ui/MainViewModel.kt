@@ -1,7 +1,11 @@
 package com.example.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.MwasoWamiApp
@@ -23,7 +27,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -39,6 +45,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val audioVisualizerState: StateFlow<com.example.service.audio.RealtimeAudioState> = playbackController.audioVisualizerState
     val appSettings: StateFlow<AppSettings> = playbackController.appSettings
     val sleepTimerRemainingSec: StateFlow<Int?> = playbackController.sleepTimerRemainingSec
+
+    // High-efficiency discrete state flows to prevent recomposition loops on 200ms tickers
+    val currentTrackId: StateFlow<Long?> = playbackController.playbackState
+        .map { it.currentTrack?.id }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isPlaying: StateFlow<Boolean> = playbackController.playbackState
+        .map { it.isPlaying }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val currentTrack: StateFlow<AudioTrack?> = playbackController.playbackState
+        .map { it.currentTrack }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _selectedSortOrder = MutableStateFlow(SortOrder.TITLE_AZ)
     val selectedSortOrder: StateFlow<SortOrder> = _selectedSortOrder.asStateFlow()
@@ -105,6 +127,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val roomStart = System.currentTimeMillis()
             repository.getOrCreateSettings()
             Log.d("PERF", "[PERF] Settings initialized in background: ${System.currentTimeMillis() - roomStart}ms")
+            if (hasMediaPermission()) {
+                scanMedia(forceRescan = false)
+            }
+        }
+    }
+
+    private fun hasMediaPermission(): Boolean {
+        val app = getApplication<Application>()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(app, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(app, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun onPermissionGranted() {
+        viewModelScope.launch(Dispatchers.IO) {
+            hasInitialScanCompleted = false
             scanMedia(forceRescan = false)
         }
     }
@@ -157,7 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearQueue() = playbackController.clearQueue()
 
     fun toggleFavorite(track: AudioTrack) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.setFavorite(track.id, !track.isFavorite)
         }
     }
@@ -211,49 +251,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // History
     fun clearHistory() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.clearHistory()
         }
     }
 
     // Settings Updates
     fun updateEarlyTransition(seconds: Int) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(earlyTransitionSec = seconds)
             repository.updateSettings(updated)
         }
     }
 
     fun updateCrossfade(seconds: Int) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(crossfadeDurationSec = seconds)
             repository.updateSettings(updated)
         }
     }
 
     fun updateEconomyMode(enabled: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(economyMode = enabled)
             repository.updateSettings(updated)
         }
     }
 
     fun updateThemeMode(mode: ThemeMode) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(themeMode = mode)
             repository.updateSettings(updated)
         }
     }
 
     fun updateVideoLockBehavior(behavior: VideoScreenLockBehavior) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(videoLockBehavior = behavior)
             repository.updateSettings(updated)
         }
     }
 
     fun updateGesturesEnabled(enabled: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val updated = appSettings.value.copy(gesturesEnabled = enabled)
             repository.updateSettings(updated)
         }

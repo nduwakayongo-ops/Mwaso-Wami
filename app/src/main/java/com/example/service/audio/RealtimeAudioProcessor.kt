@@ -35,6 +35,9 @@ object DjAudioMixerMonitor {
     private val _playerBPcm = MutableStateFlow(PcmTelemetry(playerTag = "PLAYER_B"))
     val playerBPcm: StateFlow<PcmTelemetry> = _playerBPcm.asStateFlow()
 
+    val hasTelemetrySubscribers: Boolean
+        get() = _playerAPcm.subscriptionCount.value > 0 || _playerBPcm.subscriptionCount.value > 0
+
     fun updateTelemetry(
         tag: String,
         sampleCount: Int,
@@ -75,8 +78,10 @@ object DjAudioMixerMonitor {
 @OptIn(UnstableApi::class)
 class RealtimeAudioProcessor(
     val visualizerEngine: RealtimeAudioVisualizerEngine? = null,
-    val playerTag: String = "PLAYER_A"
+    var playerTag: String = "PLAYER_A"
 ) : BaseAudioProcessor() {
+
+    private var lastTelemetryTimestamp = 0L
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
@@ -91,78 +96,91 @@ class RealtimeAudioProcessor(
         val remaining = inputBuffer.remaining()
         if (remaining == 0) return
 
+        // 1. Immediately copy to output buffer so AudioTrack hardware pipeline never starves
+        val outputBuffer = replaceOutputBuffer(remaining)
+        val readOnlySlice = inputBuffer.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
+        val audioStartPos = readOnlySlice.position()
+        outputBuffer.put(inputBuffer)
+        outputBuffer.flip()
+
         val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: 44100
         val channelCount = inputAudioFormat.channelCount.takeIf { it > 0 } ?: 2
         val encoding = inputAudioFormat.encoding
+        val now = System.currentTimeMillis()
 
-        // Read-only analysis for real PCM proof
-        val readOnlyCopy = inputBuffer.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
+        // 2. Telemetry update throttled to ~80ms to eliminate CPU and GC pressure, only if actively monitored
+        if (DjAudioMixerMonitor.hasTelemetrySubscribers && (now - lastTelemetryTimestamp >= 80L)) {
+            lastTelemetryTimestamp = now
+            var sumSquares = 0.0
+            var maxPeak = 0f
+            var count = 0
+            var zeroCrossings = 0
+            var prevSample = 0f
 
-        var sumSquares = 0.0
-        var maxPeak = 0f
-        var count = 0
-        var zeroCrossings = 0
-        var prevSample = 0f
-
-        if (encoding == C.ENCODING_PCM_16BIT) {
-            val shortBuffer = readOnlyCopy.asShortBuffer()
-            val totalShorts = shortBuffer.remaining()
-            count = totalShorts / channelCount
-            while (shortBuffer.hasRemaining()) {
-                val sample = shortBuffer.get() / 32768.0f
-                sumSquares += (sample * sample)
-                val absSample = kotlin.math.abs(sample)
-                if (absSample > maxPeak) maxPeak = absSample
-                if ((sample > 0f && prevSample <= 0f) || (sample < 0f && prevSample >= 0f)) {
-                    zeroCrossings++
+            if (encoding == C.ENCODING_PCM_16BIT) {
+                readOnlySlice.position(audioStartPos)
+                val shortBuffer = readOnlySlice.asShortBuffer()
+                val totalShorts = shortBuffer.remaining()
+                val sampleLimit = minOf(totalShorts, 512 * channelCount)
+                count = sampleLimit / channelCount
+                var i = 0
+                while (i < sampleLimit && shortBuffer.hasRemaining()) {
+                    val sample = shortBuffer.get() / 32768.0f
+                    sumSquares += (sample * sample)
+                    val absSample = kotlin.math.abs(sample)
+                    if (absSample > maxPeak) maxPeak = absSample
+                    if ((sample > 0f && prevSample <= 0f) || (sample < 0f && prevSample >= 0f)) {
+                        zeroCrossings++
+                    }
+                    prevSample = sample
+                    i++
                 }
-                prevSample = sample
-            }
-        } else if (encoding == C.ENCODING_PCM_FLOAT) {
-            val floatBuffer = readOnlyCopy.asFloatBuffer()
-            val totalFloats = floatBuffer.remaining()
-            count = totalFloats / channelCount
-            while (floatBuffer.hasRemaining()) {
-                val sample = floatBuffer.get()
-                sumSquares += (sample * sample)
-                val absSample = kotlin.math.abs(sample)
-                if (absSample > maxPeak) maxPeak = absSample
-                if ((sample > 0f && prevSample <= 0f) || (sample < 0f && prevSample >= 0f)) {
-                    zeroCrossings++
+            } else if (encoding == C.ENCODING_PCM_FLOAT) {
+                readOnlySlice.position(audioStartPos)
+                val floatBuffer = readOnlySlice.asFloatBuffer()
+                val totalFloats = floatBuffer.remaining()
+                val sampleLimit = minOf(totalFloats, 512 * channelCount)
+                count = sampleLimit / channelCount
+                var i = 0
+                while (i < sampleLimit && floatBuffer.hasRemaining()) {
+                    val sample = floatBuffer.get()
+                    sumSquares += (sample * sample)
+                    val absSample = kotlin.math.abs(sample)
+                    if (absSample > maxPeak) maxPeak = absSample
+                    if ((sample > 0f && prevSample <= 0f) || (sample < 0f && prevSample >= 0f)) {
+                        zeroCrossings++
+                    }
+                    prevSample = sample
+                    i++
                 }
-                prevSample = sample
             }
-        }
 
-        val rms = if (count > 0) sqrt(sumSquares / (count * channelCount)).toFloat() else 0f
-        val dominantFreq = if (count > 0) (zeroCrossings * sampleRate.toFloat()) / (2f * count * channelCount) else 0f
+            val rms = if (count > 0) sqrt(sumSquares / count).toFloat() else 0f
+            val dominantFreq = if (count > 0 && sampleRate > 0) (zeroCrossings * sampleRate.toFloat()) / (2f * count) else 0f
 
-        // Update central real-time diagnostic monitor
-        DjAudioMixerMonitor.updateTelemetry(
-            tag = playerTag,
-            sampleCount = count,
-            rms = rms,
-            peak = maxPeak,
-            dominantFreq = dominantFreq
-        )
-
-        // Feed Visualizer Engine
-        try {
-            readOnlyCopy.rewind()
-            visualizerEngine?.processPcmBuffer(
-                buffer = readOnlyCopy,
-                sampleRate = sampleRate,
-                channelCount = channelCount,
-                encoding = encoding
+            DjAudioMixerMonitor.updateTelemetry(
+                tag = playerTag,
+                sampleCount = count,
+                rms = rms,
+                peak = maxPeak,
+                dominantFreq = dominantFreq
             )
-        } catch (e: Exception) {
-            // Never crash audio pipeline
         }
 
-        // Pass audio samples down the pipeline to AudioTrack hardware unchanged
-        val outputBuffer = replaceOutputBuffer(remaining)
-        outputBuffer.put(inputBuffer)
-        outputBuffer.flip()
+        // 3. Feed Visualizer Engine ONLY if visualizer UI is actively subscribed
+        if (visualizerEngine != null && visualizerEngine.hasSubscribers) {
+            try {
+                readOnlySlice.position(audioStartPos)
+                visualizerEngine.processPcmBuffer(
+                    buffer = readOnlySlice,
+                    sampleRate = sampleRate,
+                    channelCount = channelCount,
+                    encoding = encoding
+                )
+            } catch (e: Exception) {
+                // Non-fatal, protect audio pipeline
+            }
+        }
     }
 
     override fun onFlush() {

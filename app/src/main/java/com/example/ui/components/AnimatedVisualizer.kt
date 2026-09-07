@@ -48,10 +48,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
 import com.example.service.audio.RealtimeAudioState
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.sin
 
 // Reference Color Palette
@@ -65,6 +67,54 @@ private val ColorCyan = Color(0xFF06B6D4)
 private val ColorElectricBlue = Color(0xFF38BDF8)
 private val ColorNeonGreen = Color(0xFF22C55E)
 
+// Pre-allocated static lists to eliminate GC pressure during 60fps rendering
+private val LeftBarColors = listOf(
+    ColorGold.copy(alpha = 0.9f),
+    ColorWarmOrange.copy(alpha = 0.75f),
+    ColorCoral.copy(alpha = 0.2f)
+)
+
+private val RightBarColors = listOf(
+    ColorElectricBlue.copy(alpha = 0.9f),
+    ColorCyan.copy(alpha = 0.75f),
+    ColorPurple.copy(alpha = 0.2f)
+)
+
+private val CardBorderColors = listOf(
+    ColorWarmOrange,
+    ColorMagenta,
+    ColorPurple,
+    ColorCyan
+)
+
+private val LeftWaveColorsPerLayer = Array(3) { layer ->
+    val layerScale = 1.0f - layer * 0.2f
+    listOf(
+        ColorWarmOrange.copy(alpha = 0.2f),
+        ColorCoral.copy(alpha = 0.9f * layerScale),
+        ColorGold.copy(alpha = 0.95f * layerScale)
+    )
+}
+
+private val RightWaveColorsPerLayer = Array(3) { layer ->
+    val layerScale = 1.0f - layer * 0.2f
+    listOf(
+        ColorCyan.copy(alpha = 0.95f * layerScale),
+        ColorElectricBlue.copy(alpha = 0.85f * layerScale),
+        ColorCyan.copy(alpha = 0.2f)
+    )
+}
+
+private val CenterWaveColorsPerLayer = Array(3) { layer ->
+    val layerScale = 1.0f - layer * 0.2f
+    listOf(
+        ColorWarmOrange.copy(alpha = 0.3f),
+        ColorMagenta.copy(alpha = 0.8f * layerScale),
+        ColorPurple.copy(alpha = 0.8f * layerScale),
+        ColorCyan.copy(alpha = 0.3f)
+    )
+}
+
 /**
  * Real-time dynamic audio waves surrounding the central album cover.
  * Reproduces the visual design of the reference image with live PCM and FFT audio data.
@@ -72,17 +122,24 @@ private val ColorNeonGreen = Color(0xFF22C55E)
 @Composable
 fun RealtimeCoverWithAudioWaves(
     artworkUri: String?,
-    audioState: RealtimeAudioState,
     isPlaying: Boolean,
     economyMode: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    audioVisualizerState: StateFlow<RealtimeAudioState>? = null,
+    audioState: RealtimeAudioState = RealtimeAudioState()
 ) {
-    val waveform = audioState.waveform
-    val fftBands = audioState.fftBands
-    val bass = if (isPlaying) audioState.bassEnergy else 0f
-    val treble = if (isPlaying) audioState.trebleEnergy else 0f
-    val amplitude = if (isPlaying) audioState.overallAmplitude else 0f
-    val beatPulse = if (isPlaying && !economyMode) audioState.beatPulse else 1.0f
+    val liveAudioState = if (audioVisualizerState != null) {
+        val state by audioVisualizerState.collectAsStateWithLifecycle()
+        state
+    } else {
+        audioState
+    }
+    val waveform = liveAudioState.waveform
+    val fftBands = liveAudioState.fftBands
+    val bass = if (isPlaying) liveAudioState.bassEnergy else 0f
+    val treble = if (isPlaying) liveAudioState.trebleEnergy else 0f
+    val amplitude = if (isPlaying) liveAudioState.overallAmplitude else 0f
+    val beatPulse = if (isPlaying && !economyMode) liveAudioState.beatPulse else 1.0f
 
     // Reusable Path to avoid per-frame allocations
     val wavePathLeft = remember { Path() }
@@ -164,11 +221,7 @@ fun RealtimeCoverWithAudioWaves(
 
                 drawRoundRect(
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            ColorGold.copy(alpha = 0.9f),
-                            ColorWarmOrange.copy(alpha = 0.75f),
-                            ColorCoral.copy(alpha = 0.2f)
-                        ),
+                        colors = LeftBarColors,
                         startY = topY,
                         endY = topY + barH
                     ),
@@ -188,11 +241,7 @@ fun RealtimeCoverWithAudioWaves(
 
                 drawRoundRect(
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            ColorElectricBlue.copy(alpha = 0.9f),
-                            ColorCyan.copy(alpha = 0.75f),
-                            ColorPurple.copy(alpha = 0.2f)
-                        ),
+                        colors = RightBarColors,
                         startY = topY,
                         endY = topY + barH
                     ),
@@ -238,11 +287,7 @@ fun RealtimeCoverWithAudioWaves(
                 drawPath(
                     path = wavePathLeft,
                     brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            ColorWarmOrange.copy(alpha = 0.2f),
-                            ColorCoral.copy(alpha = 0.9f * layerScale),
-                            ColorGold.copy(alpha = 0.95f * layerScale)
-                        ),
+                        colors = LeftWaveColorsPerLayer[layer],
                         startX = leftStart,
                         endX = leftEnd
                     ),
@@ -276,11 +321,7 @@ fun RealtimeCoverWithAudioWaves(
                 drawPath(
                     path = wavePathRight,
                     brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            ColorCyan.copy(alpha = 0.95f * layerScale),
-                            ColorElectricBlue.copy(alpha = 0.85f * layerScale),
-                            ColorCyan.copy(alpha = 0.2f)
-                        ),
+                        colors = RightWaveColorsPerLayer[layer],
                         startX = rightStart,
                         endX = rightEnd
                     ),
@@ -311,12 +352,7 @@ fun RealtimeCoverWithAudioWaves(
                 drawPath(
                     path = wavePathCenter,
                     brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            ColorWarmOrange.copy(alpha = 0.3f),
-                            ColorMagenta.copy(alpha = 0.8f * layerScale),
-                            ColorPurple.copy(alpha = 0.8f * layerScale),
-                            ColorCyan.copy(alpha = 0.3f)
-                        ),
+                        colors = CenterWaveColorsPerLayer[layer],
                         startX = 0f,
                         endX = canvasW
                     ),
@@ -343,29 +379,29 @@ fun RealtimeCoverWithAudioWaves(
                 .clip(RoundedCornerShape(22.dp))
                 .border(
                     width = 2.dp,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            ColorWarmOrange,
-                            ColorMagenta,
-                            ColorPurple,
-                            ColorCyan
-                        )
-                    ),
+                    brush = Brush.horizontalGradient(CardBorderColors),
                     shape = RoundedCornerShape(22.dp)
                 )
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            if (artworkUri != null) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
+            val context = LocalContext.current
+            val artworkRequest = remember(artworkUri) {
+                if (artworkUri != null) {
+                    ImageRequest.Builder(context)
                         .data(artworkUri)
                         .size(400, 400)
                         .precision(coil.size.Precision.INEXACT)
                         .placeholder(R.drawable.ic_album_placeholder)
                         .error(R.drawable.ic_album_placeholder)
                         .crossfade(150)
-                        .build(),
+                        .build()
+                } else null
+            }
+
+            if (artworkRequest != null) {
+                AsyncImage(
+                    model = artworkRequest,
                     contentDescription = "Capa do Álbum",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -394,16 +430,23 @@ fun RealtimeWaveformProgressBar(
     currentPositionMs: Long,
     formattedCurrent: String,
     formattedDuration: String,
-    audioState: RealtimeAudioState,
     isPlaying: Boolean,
     onSeekTo: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    audioVisualizerState: StateFlow<RealtimeAudioState>? = null,
+    audioState: RealtimeAudioState = RealtimeAudioState()
 ) {
+    val liveAudioState = if (audioVisualizerState != null) {
+        val state by audioVisualizerState.collectAsStateWithLifecycle()
+        state
+    } else {
+        audioState
+    }
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
 
     val activeProgress = if (isDragging) dragProgress else progress.coerceIn(0f, 1f)
-    val fftBands = audioState.fftBands
+    val fftBands = liveAudioState.fftBands
 
     Column(
         modifier = modifier
@@ -560,12 +603,19 @@ fun RealtimeWaveformProgressBar(
  */
 @Composable
 fun RealtimeMiniVisualizer(
-    audioState: RealtimeAudioState,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
-    barCount: Int = 16
+    barCount: Int = 16,
+    audioVisualizerState: StateFlow<RealtimeAudioState>? = null,
+    audioState: RealtimeAudioState = RealtimeAudioState()
 ) {
-    val fftBands = audioState.fftBands
+    val liveAudioState = if (audioVisualizerState != null) {
+        val state by audioVisualizerState.collectAsStateWithLifecycle()
+        state
+    } else {
+        audioState
+    }
+    val fftBands = liveAudioState.fftBands
 
     Canvas(
         modifier = modifier

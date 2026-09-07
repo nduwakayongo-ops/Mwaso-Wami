@@ -27,11 +27,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -61,7 +61,7 @@ fun MainScreen(
     viewModel: MainViewModel,
     onFirstUIRendered: () -> Unit = {}
 ) {
-    val appSettings by viewModel.appSettings.collectAsState()
+    val appSettings by viewModel.appSettings.collectAsStateWithLifecycle()
     val isSystemDark = isSystemInDarkTheme()
     val isDarkTheme = when (appSettings.themeMode) {
         ThemeMode.DARK -> true
@@ -74,17 +74,18 @@ fun MainScreen(
     }
 
     MyApplicationTheme(darkTheme = isDarkTheme) {
-        val tracks by viewModel.tracks.collectAsState()
-        val playbackState by viewModel.playbackState.collectAsState()
-        val audioState by viewModel.audioVisualizerState.collectAsState()
-        val selectedSortOrder by viewModel.selectedSortOrder.collectAsState()
-        val searchQuery by viewModel.searchQuery.collectAsState()
-        val isScanning by viewModel.isScanning.collectAsState()
-        val isFullPlayerOpen by viewModel.isFullPlayerOpen.collectAsState()
-        val selectedVideo by viewModel.selectedVideo.collectAsState()
-        val showSleepTimerDialog by viewModel.showSleepTimerDialog.collectAsState()
-        val showTrackDetailsDialog by viewModel.showTrackDetailsDialog.collectAsState()
-        val sleepTimerRemainingSec by viewModel.sleepTimerRemainingSec.collectAsState()
+        val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+        val currentTrackId by viewModel.currentTrackId.collectAsStateWithLifecycle()
+        val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+        val selectedSortOrder by viewModel.selectedSortOrder.collectAsStateWithLifecycle()
+        val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+        val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+        val isFullPlayerOpen by viewModel.isFullPlayerOpen.collectAsStateWithLifecycle()
+        val selectedVideo by viewModel.selectedVideo.collectAsStateWithLifecycle()
+        val showSleepTimerDialog by viewModel.showSleepTimerDialog.collectAsStateWithLifecycle()
+        val showTrackDetailsDialog by viewModel.showTrackDetailsDialog.collectAsStateWithLifecycle()
+        val sleepTimerRemainingSec by viewModel.sleepTimerRemainingSec.collectAsStateWithLifecycle()
 
         var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -94,7 +95,7 @@ fun MainScreen(
         ) { permissions ->
             val granted = permissions.values.any { it }
             if (granted) {
-                viewModel.scanMedia(forceRescan = false)
+                viewModel.onPermissionGranted()
             }
         }
 
@@ -164,8 +165,8 @@ fun MainScreen(
                 when (selectedTab) {
                     0 -> AudioLibraryScreen(
                         tracks = tracks,
-                        currentTrackId = playbackState.currentTrack?.id,
-                        isPlaying = playbackState.isPlaying,
+                        currentTrackId = currentTrackId,
+                        isPlaying = isPlaying,
                         selectedSortOrder = selectedSortOrder,
                         searchQuery = searchQuery,
                         isScanning = isScanning,
@@ -179,7 +180,7 @@ fun MainScreen(
                         onShowInfo = { viewModel.showTrackDetails(it) }
                     )
                     1 -> {
-                        val videos by viewModel.videos.collectAsState()
+                        val videos by viewModel.videos.collectAsStateWithLifecycle()
                         VideoLibraryScreen(
                             videos = videos,
                             isScanning = isScanning,
@@ -188,7 +189,7 @@ fun MainScreen(
                         )
                     }
                     2 -> {
-                        val favoriteTracks by viewModel.favoriteTracks.collectAsState()
+                        val favoriteTracks by viewModel.favoriteTracks.collectAsStateWithLifecycle()
                         QueueAndFavoritesScreen(
                             playbackState = playbackState,
                             favoriteTracks = favoriteTracks,
@@ -203,12 +204,12 @@ fun MainScreen(
                         )
                     }
                     3 -> {
-                        val totalTrackCount by viewModel.totalTrackCount.collectAsState()
-                        val totalPlaybackTimeMs by viewModel.totalPlaybackTimeMs.collectAsState()
-                        val totalPlayCount by viewModel.totalPlayCount.collectAsState()
-                        val topArtist by viewModel.topArtist.collectAsState()
-                        val topGenre by viewModel.topGenre.collectAsState()
-                        val history by viewModel.history.collectAsState()
+                        val totalTrackCount by viewModel.totalTrackCount.collectAsStateWithLifecycle()
+                        val totalPlaybackTimeMs by viewModel.totalPlaybackTimeMs.collectAsStateWithLifecycle()
+                        val totalPlayCount by viewModel.totalPlayCount.collectAsStateWithLifecycle()
+                        val topArtist by viewModel.topArtist.collectAsStateWithLifecycle()
+                        val topGenre by viewModel.topGenre.collectAsStateWithLifecycle()
+                        val history by viewModel.history.collectAsStateWithLifecycle()
                         StatisticsScreen(
                             totalTrackCount = totalTrackCount,
                             totalPlaybackTimeMs = totalPlaybackTimeMs,
@@ -234,7 +235,7 @@ fun MainScreen(
                 if (!isFullPlayerOpen && selectedVideo == null) {
                     MiniPlayerBar(
                         playbackState = playbackState,
-                        audioState = audioState,
+                        audioVisualizerState = viewModel.audioVisualizerState,
                         onTogglePlayPause = { viewModel.togglePlayPause() },
                         onSkipNext = { viewModel.skipNext() },
                         onClick = { viewModel.openFullPlayer() },
@@ -251,7 +252,7 @@ fun MainScreen(
                 ) {
                     FullAudioPlayerScreen(
                         playbackState = playbackState,
-                        audioState = audioState,
+                        audioVisualizerState = viewModel.audioVisualizerState,
                         economyMode = appSettings.economyMode,
                         sleepTimerRemainingSec = sleepTimerRemainingSec,
                         onClose = { viewModel.closeFullPlayer() },

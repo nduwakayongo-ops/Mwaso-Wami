@@ -1,9 +1,7 @@
 package com.example
 
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,17 +17,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Log.d("PERF", "[PERF] MainActivity start")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
-            @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
-        }
-
         enableEdgeToEdge()
         setContent {
             MainScreen(
@@ -39,6 +26,24 @@ class MainActivity : ComponentActivity() {
                     Log.d("PERF", "[PERF] First UI rendered: ${duration}ms")
                 }
             )
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        viewModel.playbackController.visualizerEngine.setScreenVisible(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.playbackController.visualizerEngine.setScreenVisible(false)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        val controller = com.example.service.PlaybackController.getInstance(applicationContext)
+        if (controller.playbackState.value.isPlaying || controller.transitionManager.isCrossfadeActive) {
+            Log.i(com.example.service.MediaPlaybackService.LOG_TAG, "MWASO_ACTIVITY_DESTROYED_KEEPING_PLAYBACK")
         }
     }
 }

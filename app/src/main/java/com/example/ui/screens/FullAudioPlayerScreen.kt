@@ -42,6 +42,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,7 +71,8 @@ private val BackgroundPitchBlack = Color(0xFF070709)
 @Composable
 fun FullAudioPlayerScreen(
     playbackState: PlaybackState,
-    audioState: RealtimeAudioState,
+    audioVisualizerState: StateFlow<RealtimeAudioState>? = null,
+    audioState: RealtimeAudioState = RealtimeAudioState(),
     economyMode: Boolean,
     sleepTimerRemainingSec: Int?,
     onClose: () -> Unit,
@@ -222,6 +225,7 @@ fun FullAudioPlayerScreen(
             // ----------------------------------------------------
             RealtimeCoverWithAudioWaves(
                 artworkUri = track.artworkUri,
+                audioVisualizerState = audioVisualizerState,
                 audioState = audioState,
                 isPlaying = playbackState.isPlaying,
                 economyMode = economyMode,
@@ -287,6 +291,7 @@ fun FullAudioPlayerScreen(
                 currentPositionMs = playbackState.currentPositionMs,
                 formattedCurrent = playbackState.formattedCurrentPosition,
                 formattedDuration = playbackState.formattedDuration,
+                audioVisualizerState = audioVisualizerState,
                 audioState = audioState,
                 isPlaying = playbackState.isPlaying,
                 onSeekTo = onSeekTo,

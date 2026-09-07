@@ -51,6 +51,7 @@ class AudioTransitionManager(
 
     private var crossfadeJob: Job? = null
     private var secondaryPlayer: ExoPlayer? = null
+    private var secondaryAudioProcessor: com.example.service.audio.RealtimeAudioProcessor? = null
     private var currentTargetTrack: AudioTrack? = null
     private var currentTargetIndex: Int = -1
 
@@ -165,7 +166,12 @@ class AudioTransitionManager(
             releaseSecondaryPlayer()
 
             // 1. Create Secondary ExoPlayer instance with dedicated AudioProcessor instance (Tagged PLAYER_B)
-            val builder = if (visualizerEngine != null) {
+            val processor = if (visualizerEngine != null) {
+                com.example.service.audio.RealtimeAudioProcessor(visualizerEngine, playerTag = "PLAYER_B")
+            } else null
+            secondaryAudioProcessor = processor
+
+            val builder = if (processor != null) {
                 val renderersFactory = object : androidx.media3.exoplayer.DefaultRenderersFactory(context) {
                     override fun buildAudioSink(
                         context: Context,
@@ -173,7 +179,7 @@ class AudioTransitionManager(
                         enableAudioTrackPlaybackParams: Boolean
                     ): androidx.media3.exoplayer.audio.AudioSink {
                         return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                            .setAudioProcessors(arrayOf(com.example.service.audio.RealtimeAudioProcessor(visualizerEngine, playerTag = "PLAYER_B")))
+                            .setAudioProcessors(arrayOf(processor))
                             .build()
                     }
                 }
@@ -219,14 +225,13 @@ class AudioTransitionManager(
 
             Log.d(
                 "AudioTransitionManager",
-                "[CROSSFADE_STARTED] A position = ${primaryPlayer.currentPosition} ms | A duration = ${primaryPlayer.duration} ms | A volume = ${primaryPlayer.volume} | B position = ${nextPlayer.currentPosition} ms | B volume = ${nextPlayer.volume} | A.isPlaying = ${primaryPlayer.isPlaying} | B.isPlaying = ${nextPlayer.isPlaying}"
+                "[CROSSFADE_STARTED] A pos=${primaryPlayer.currentPosition}ms | B pos=${nextPlayer.currentPosition}ms"
             )
 
             // 3. Smooth simultaneous crossfade coroutine (Equal-Power DJ curve)
             crossfadeJob = scope.launch(Dispatchers.Main) {
                 val startTime = System.currentTimeMillis()
-                val stepIntervalMs = 25L
-                var lastLoggedSec = -1
+                val stepIntervalMs = 30L
 
                 while (_crossfadeState.value == CrossfadeState.CROSSFADE_ACTIVE) {
                     val elapsed = System.currentTimeMillis() - startTime
@@ -238,15 +243,6 @@ class AudioTransitionManager(
 
                     primaryPlayer.volume = oldGain
                     secondaryPlayer?.volume = newGain
-
-                    val currentElapsedSec = (elapsed / 1000).toInt()
-                    if (currentElapsedSec != lastLoggedSec) {
-                        lastLoggedSec = currentElapsedSec
-                        Log.d(
-                            "AudioTransitionManager",
-                            "[CROSSFADE_PROGRESS +${elapsed}ms] A pos: ${primaryPlayer.currentPosition}ms (vol: ${"%.2f".format(oldGain)}) | B pos: ${secondaryPlayer?.currentPosition}ms (vol: ${"%.2f".format(newGain)}) | A.isPlaying: ${primaryPlayer.isPlaying} | B.isPlaying: ${secondaryPlayer?.isPlaying}"
-                        )
-                    }
 
                     if (progress >= 1.0f) {
                         break
@@ -261,11 +257,16 @@ class AudioTransitionManager(
                 if (promotedPlayer != null) {
                     promotedPlayer.volume = 1.0f
                     secondaryPlayer = null
+                    // Update audio processor tag to primary PLAYER_A and reset PLAYER_B
+                    secondaryAudioProcessor?.playerTag = "PLAYER_A"
+                    com.example.service.audio.DjAudioMixerMonitor.resetTelemetry("PLAYER_B")
+                    secondaryAudioProcessor = null
+
                     _crossfadeState.value = CrossfadeState.COMPLETED
                     currentTargetTrack = null
                     currentTargetIndex = -1
 
-                    Log.d("AudioTransitionManager", "[CROSSFADE_COMPLETED] Promoting Track 2 at position ${promotedPlayer.currentPosition}ms. Track 1 released.")
+                    Log.d("AudioTransitionManager", "[CROSSFADE_COMPLETED] Promoting Track 2 at pos ${promotedPlayer.currentPosition}ms")
 
                     // Promote the playing instance without ANY seekTo(0) reset!
                     onTransitionComplete(promotedPlayer, nextTrack, nextIndex)
@@ -295,13 +296,17 @@ class AudioTransitionManager(
             primaryPlayer.clearMediaItems()
             primaryPlayer.release()
         } catch (e: Exception) {
-            Log.w("AudioTransitionManager", "Error releasing old primary player: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Error releasing old primary player in AudioTransitionManager: ${e.message}", e)
         }
 
         val promotedPlayer = secondaryPlayer
         if (promotedPlayer != null) {
             promotedPlayer.volume = 1.0f
             secondaryPlayer = null
+            secondaryAudioProcessor?.playerTag = "PLAYER_A"
+            com.example.service.audio.DjAudioMixerMonitor.resetTelemetry("PLAYER_B")
+            secondaryAudioProcessor = null
+
             _crossfadeState.value = CrossfadeState.COMPLETED
             currentTargetTrack = null
             currentTargetIndex = -1
@@ -339,9 +344,11 @@ class AudioTransitionManager(
             secondaryPlayer?.clearMediaItems()
             secondaryPlayer?.release()
         } catch (e: Exception) {
-            Log.w("AudioTransitionManager", "Error releasing secondary player: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Error releasing secondary player in AudioTransitionManager: ${e.message}", e)
         } finally {
             secondaryPlayer = null
+            secondaryAudioProcessor = null
+            com.example.service.audio.DjAudioMixerMonitor.resetTelemetry("PLAYER_B")
         }
     }
 }

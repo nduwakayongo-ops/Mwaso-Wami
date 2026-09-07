@@ -32,6 +32,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,7 +64,8 @@ private val ColorNeonGreen = Color(0xFF22C55E)
 @Composable
 fun MiniPlayerBar(
     playbackState: PlaybackState,
-    audioState: RealtimeAudioState,
+    audioVisualizerState: StateFlow<RealtimeAudioState>? = null,
+    audioState: RealtimeAudioState = RealtimeAudioState(),
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onClick: () -> Unit,
@@ -75,6 +80,20 @@ fun MiniPlayerBar(
         modifier = modifier
     ) {
         if (track == null) return@AnimatedVisibility
+
+        val context = LocalContext.current
+        val artworkRequest = remember(track.artworkUri) {
+            if (track.artworkUri != null) {
+                ImageRequest.Builder(context)
+                    .data(track.artworkUri)
+                    .size(120, 120)
+                    .precision(coil.size.Precision.INEXACT)
+                    .placeholder(R.drawable.ic_album_placeholder)
+                    .error(R.drawable.ic_album_placeholder)
+                    .crossfade(100)
+                    .build()
+            } else null
+        }
 
         Surface(
             modifier = Modifier
@@ -115,16 +134,9 @@ fun MiniPlayerBar(
                             .clip(RoundedCornerShape(10.dp))
                             .border(1.dp, GoldAccent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
                     ) {
-                        if (track.artworkUri != null) {
+                        if (artworkRequest != null) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(track.artworkUri)
-                                    .size(120, 120)
-                                    .precision(coil.size.Precision.INEXACT)
-                                    .placeholder(R.drawable.ic_album_placeholder)
-                                    .error(R.drawable.ic_album_placeholder)
-                                    .crossfade(100)
-                                    .build(),
+                                model = artworkRequest,
                                 contentDescription = "Capa Mini",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.size(46.dp)
@@ -172,8 +184,9 @@ fun MiniPlayerBar(
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            // Live Mini Equalizer Bars
+                            // Live Mini Equalizer Bars (isolated collection)
                             RealtimeMiniVisualizer(
+                                audioVisualizerState = audioVisualizerState,
                                 audioState = audioState,
                                 isPlaying = playbackState.isPlaying,
                                 modifier = Modifier.width(48.dp)

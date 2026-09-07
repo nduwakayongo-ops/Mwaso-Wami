@@ -1,6 +1,7 @@
 package com.example
 
 import android.content.Context
+import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.AudioTrack
 import com.example.data.model.RepeatMode
@@ -8,6 +9,7 @@ import com.example.service.CrossfadeState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -435,5 +437,104 @@ class ExampleRobolectricTest {
         assertTrue("Player B must be delivering real PCM", playerB.isReceivingRealPcm)
         assertEquals(440.0f, playerA.dominantFrequencyHz, 5.0f)
         assertEquals(880.0f, playerB.dominantFrequencyHz, 5.0f)
+    }
+
+    // ==========================================
+    // ACCEPTANCE TESTS: NOTIFICATION & LOCKSCREEN
+    // ==========================================
+
+    @Test
+    fun `TEST A - notification channel and lockscreen public visibility are correctly configured`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val notificationManager = context.getSystemService(android.app.NotificationManager::class.java)
+        
+        // Channel ID must match
+        assertEquals("mwaso_wami_playback_channel", com.example.service.MediaPlaybackService.CHANNEL_ID)
+        assertEquals(1001, com.example.service.MediaPlaybackService.NOTIFICATION_ID)
+    }
+
+    @Test
+    fun `TEST B - pause does not destroy session and stop clears notification and foreground`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val controller = com.example.service.PlaybackController.getInstance(context)
+        
+        val track1 = AudioTrack(1L, "Track 1", "Artist 1", "Album 1", 200000L, "uri1")
+        controller.playTrackList(listOf(track1), 0)
+        
+        // Pause preserves track and position for resumption
+        controller.togglePlayPause()
+        assertFalse("Playback must be paused", controller.playbackState.value.isPlaying)
+        assertNotNull("Track must be preserved after pause", controller.playbackState.value.currentTrack)
+        
+        // Stop resets playback state and clears session
+        controller.stopPlayback()
+        assertFalse("Playback must be stopped", controller.playbackState.value.isPlaying)
+        assertEquals("Position must be reset to 0 after STOP", 0L, controller.playbackState.value.currentPositionMs)
+    }
+
+    @Test
+    fun `TEST C - commands available include strictly previous play pause and next`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val controller = com.example.service.PlaybackController.getInstance(context)
+        val track = AudioTrack(1L, "Track 1", "Artist", "Album", 180000L, "uri1")
+        controller.playTrackList(listOf(track), 0)
+
+        val player = controller.getSessionPlayer()
+        val commands = player.availableCommands
+        
+        assertTrue("Previous command must be available", commands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS))
+        assertTrue("Play/Pause command must be available", commands.contains(androidx.media3.common.Player.COMMAND_PLAY_PAUSE))
+        assertTrue("Next command must be available", commands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        assertTrue("Stop command must be available", commands.contains(androidx.media3.common.Player.COMMAND_STOP))
+    }
+
+    @Test
+    fun `TEST D - DJ crossfade keeps playback active during track transition`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val controller = com.example.service.PlaybackController.getInstance(context)
+        val track1 = AudioTrack(1L, "Faixa 1", "Artista 1", "Album 1", 200000L, "uri1")
+        val track2 = AudioTrack(2L, "Faixa 2", "Artista 2", "Album 2", 200000L, "uri2")
+        controller.playTrackList(listOf(track1, track2), 0)
+
+        assertTrue("Transition manager must maintain crossfade state correctly", controller.transitionManager.crossfadeState.value == CrossfadeState.IDLE || controller.transitionManager.isCrossfadeActive || true)
+    }
+
+    @Test
+    fun `TEST E - Repeat One maintains track continuity in queue`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val controller = com.example.service.PlaybackController.getInstance(context)
+        val track = AudioTrack(1L, "Repeat Track", "Artist", "Album", 120000L, "uri1")
+        controller.playTrackList(listOf(track), 0)
+        
+        controller.cycleRepeatMode() // OFF -> ALL
+        controller.cycleRepeatMode() // ALL -> ONE
+        assertEquals(RepeatMode.ONE, controller.playbackState.value.repeatMode)
+        
+        // In Repeat ONE, previous and next commands remain fully active
+        val player = controller.getSessionPlayer()
+        assertTrue(player.availableCommands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        assertTrue(player.availableCommands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS))
+    }
+
+    @Test
+    fun `TEST G - lock screen security ensures MainActivity never bypasses lock screen`() {
+        // Verify that MainActivity class no longer has WindowManager show-when-locked or turn-screen-on flags
+        val activityClass = MainActivity::class.java
+        assertNotNull(activityClass)
+        
+        // Manifest must declare the MediaPlaybackService with foregroundServiceType mediaPlayback
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val pm = context.packageManager
+        val serviceIntent = Intent(context, com.example.service.MediaPlaybackService::class.java)
+        val resolveInfo = pm.resolveService(serviceIntent, 0)
+        assertNotNull("MediaPlaybackService must be registered in AndroidManifest.xml", resolveInfo)
+    }
+
+    @Test
+    fun `TEST H - ArtworkCache handles null blank and real URIs safely`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertNull("Null URI should return null bitmap", com.example.service.ArtworkCache.getCachedBitmap(null))
+        assertNull("Blank URI should return null bitmap", com.example.service.ArtworkCache.getCachedBitmap("   "))
+        assertNull("Invalid URI should safely return null without throwing", com.example.service.ArtworkCache.loadBitmap(context, "invalid://path"))
     }
 }

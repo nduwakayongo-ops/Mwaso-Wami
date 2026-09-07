@@ -3,6 +3,7 @@ package com.example.service
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -30,6 +31,7 @@ import java.util.Collections
 
 class PlaybackController private constructor(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var repository: MediaRepository? = null
 
     private val _playbackState = MutableStateFlow(PlaybackState())
@@ -62,6 +64,7 @@ class PlaybackController private constructor(private val context: Context) {
             _playbackState.update { it.copy(isPlaying = isPlaying) }
             visualizerEngine.setPlaying(isPlaying)
             if (isPlaying) {
+                Log.i(MediaPlaybackService.LOG_TAG, "MWASO_PLAYBACK_STARTED")
                 startTicker()
                 startMediaService()
             } else {
@@ -138,15 +141,10 @@ class PlaybackController private constructor(private val context: Context) {
                 .add(Player.COMMAND_PLAY_PAUSE)
                 .add(Player.COMMAND_STOP)
                 .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-
-            if (hasNext) {
-                builder.add(Player.COMMAND_SEEK_TO_NEXT)
-                builder.add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-            }
-            if (hasPrevious) {
-                builder.add(Player.COMMAND_SEEK_TO_PREVIOUS)
-                builder.add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-            }
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
 
             return builder.build()
         }
@@ -182,6 +180,18 @@ class PlaybackController private constructor(private val context: Context) {
                 togglePlayPause()
             }
         }
+
+        override fun stop() {
+            stopPlayback()
+        }
+
+        override fun seekTo(positionMs: Long) {
+            this@PlaybackController.seekTo(positionMs)
+        }
+
+        override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            this@PlaybackController.seekTo(positionMs)
+        }
     }
 
     private fun createNewExoPlayer(): ExoPlayer {
@@ -211,21 +221,33 @@ class PlaybackController private constructor(private val context: Context) {
 
         player.volume = 1.0f
         player.addListener(playerListener)
+        Log.i(MediaPlaybackService.LOG_TAG, "MWASO_PLAYER_INITIALIZED")
         return player
     }
 
     private fun startMediaService() {
+        if (MediaPlaybackService.isStartingOrRunning || MediaPlaybackService.isRunning) {
+            return
+        }
+        MediaPlaybackService.isStartingOrRunning = true
         try {
-            val intent = Intent(context, MediaPlaybackService::class.java)
-            context.startService(intent)
+            val intent = Intent(context, MediaPlaybackService::class.java).apply {
+                action = MediaPlaybackService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Unable to start media service: ${e.message}")
+            MediaPlaybackService.isStartingOrRunning = false
+            Log.w(MediaPlaybackService.LOG_TAG, "Unable to start media service: ${e.message}", e)
         }
     }
 
     fun initRepository(repo: MediaRepository) {
         this.repository = repo
-        scope.launch {
+        ioScope.launch {
             repo.getSettingsFlow().collect { settings ->
                 if (settings != null) {
                     _appSettings.value = settings
@@ -340,7 +362,7 @@ class PlaybackController private constructor(private val context: Context) {
                 )
             }
 
-            scope.launch {
+            ioScope.launch {
                 repository?.recordTrackPlayed(track, 1000L)
             }
             startMediaService()
@@ -367,8 +389,9 @@ class PlaybackController private constructor(private val context: Context) {
     }
 
     fun togglePlayPause() {
-        if (activePlayer.isPlaying) {
+        if (activePlayer.isPlaying || _playbackState.value.isPlaying) {
             activePlayer.pause()
+            _playbackState.update { it.copy(isPlaying = false) }
             transitionManager.onPause()
         } else {
             if (_playbackState.value.currentTrack != null) {
@@ -376,6 +399,7 @@ class PlaybackController private constructor(private val context: Context) {
                     activePlayer.prepare()
                 }
                 activePlayer.play()
+                _playbackState.update { it.copy(isPlaying = true) }
                 transitionManager.onResume()
                 startMediaService()
             } else if (_playbackState.value.queue.isNotEmpty()) {
@@ -385,6 +409,7 @@ class PlaybackController private constructor(private val context: Context) {
     }
 
     fun stopPlayback() {
+        Log.i(MediaPlaybackService.LOG_TAG, "MWASO_PLAYBACK_STOPPED")
         transitionManager.resetTransition(activePlayer)
         activePlayer.stop()
         activePlayer.clearMediaItems()
@@ -396,6 +421,14 @@ class PlaybackController private constructor(private val context: Context) {
             )
         }
         stopTicker()
+        try {
+            val stopIntent = Intent(context, MediaPlaybackService::class.java).apply {
+                action = MediaPlaybackService.ACTION_STOP
+            }
+            context.startService(stopIntent)
+        } catch (e: Exception) {
+            Log.w(MediaPlaybackService.LOG_TAG, "Unable to send stop to service: ${e.message}", e)
+        }
     }
 
     fun seekTo(positionMs: Long) {
@@ -604,7 +637,7 @@ class PlaybackController private constructor(private val context: Context) {
         try {
             oldPlayer.removeListener(playerListener)
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Old player listener remove error: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Old player listener remove error: ${e.message}", e)
         }
 
         // Attach listener to promoted player and enable audio focus handling
@@ -618,7 +651,7 @@ class PlaybackController private constructor(private val context: Context) {
                 true // handle audio focus as primary player
             )
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Error setting audio focus on promoted player: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Error setting audio focus on promoted player: ${e.message}", e)
         }
         activePlayer = promotedPlayer
 
@@ -626,11 +659,11 @@ class PlaybackController private constructor(private val context: Context) {
         try {
             mediaSession?.setPlayer(getSessionPlayer())
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Error updating MediaSession player: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Error updating MediaSession player: ${e.message}", e)
         }
 
         val currentPos = activePlayer.currentPosition
-        Log.d("PlaybackController", "[PROMOTION] Player promoted at position ${currentPos}ms for track: ${nextTrack.title}")
+        Log.d(MediaPlaybackService.LOG_TAG, "[PROMOTION] Player promoted at position ${currentPos}ms for track: ${nextTrack.title}")
 
         _playbackState.update {
             it.copy(
@@ -642,7 +675,7 @@ class PlaybackController private constructor(private val context: Context) {
             )
         }
 
-        scope.launch {
+        ioScope.launch {
             repository?.recordTrackPlayed(nextTrack, 1000L)
         }
 
@@ -653,9 +686,9 @@ class PlaybackController private constructor(private val context: Context) {
             oldPlayer.stop()
             oldPlayer.clearMediaItems()
             oldPlayer.release()
-            Log.d("PlaybackController", "[PROMOTION] Old player instance released successfully.")
+            Log.d(MediaPlaybackService.LOG_TAG, "[PROMOTION] Old player instance released successfully.")
         } catch (e: Exception) {
-            Log.w("PlaybackController", "Error releasing old player instance: ${e.message}")
+            Log.w(MediaPlaybackService.LOG_TAG, "Error releasing old player instance: ${e.message}", e)
         }
     }
 

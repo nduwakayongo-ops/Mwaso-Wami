@@ -98,16 +98,23 @@ fun AudioTrackItem(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (track.artworkUri != null) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
+                val context = LocalContext.current
+                val imageRequest = remember(track.artworkUri) {
+                    if (track.artworkUri != null) {
+                        ImageRequest.Builder(context)
                             .data(track.artworkUri)
                             .size(120, 120)
                             .precision(coil.size.Precision.INEXACT)
                             .placeholder(R.drawable.ic_album_placeholder)
                             .error(R.drawable.ic_album_placeholder)
                             .crossfade(100)
-                            .build(),
+                            .build()
+                    } else null
+                }
+
+                if (imageRequest != null) {
+                    AsyncImage(
+                        model = imageRequest,
                         contentDescription = "Capa da Faixa",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.size(50.dp)
