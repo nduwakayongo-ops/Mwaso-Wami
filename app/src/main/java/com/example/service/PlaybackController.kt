@@ -365,6 +365,7 @@ class PlaybackController private constructor(private val context: Context) {
             ioScope.launch {
                 repository?.recordTrackPlayed(track, 1000L)
             }
+            recordTrackPlayed(track.id)
             startMediaService()
         } catch (e: Exception) {
             Log.e("PlaybackController", "Failed to play track ${track.title}", e)
@@ -600,6 +601,34 @@ class PlaybackController private constructor(private val context: Context) {
         }
     }
 
+    fun updateFavorite(trackId: Long, isFavorite: Boolean) {
+        _playbackState.update { state ->
+            val updatedTrack = if (state.currentTrack?.id == trackId) {
+                state.currentTrack.copy(isFavorite = isFavorite)
+            } else {
+                state.currentTrack
+            }
+            val updatedQueue = state.queue.map {
+                if (it.id == trackId) it.copy(isFavorite = isFavorite) else it
+            }
+            state.copy(currentTrack = updatedTrack, queue = updatedQueue)
+        }
+    }
+
+    private fun recordTrackPlayed(trackId: Long) {
+        _playbackState.update { state ->
+            val updatedTrack = if (state.currentTrack?.id == trackId) {
+                state.currentTrack.copy(playCount = state.currentTrack.playCount + 1)
+            } else {
+                state.currentTrack
+            }
+            val updatedQueue = state.queue.map {
+                if (it.id == trackId) it.copy(playCount = it.playCount + 1) else it
+            }
+            state.copy(currentTrack = updatedTrack, queue = updatedQueue)
+        }
+    }
+
     fun setSleepTimer(minutes: Int) {
         sleepTimerJob?.cancel()
         if (minutes <= 0) {
@@ -678,6 +707,7 @@ class PlaybackController private constructor(private val context: Context) {
         ioScope.launch {
             repository?.recordTrackPlayed(nextTrack, 1000L)
         }
+        recordTrackPlayed(nextTrack.id)
 
         startTicker()
 

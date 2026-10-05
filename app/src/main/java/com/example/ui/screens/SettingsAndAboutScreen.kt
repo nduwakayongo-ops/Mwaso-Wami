@@ -410,15 +410,16 @@ fun SettingsAndAboutScreen(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(80.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(listOf(AmberPrimary, TerracottaAccent))),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.ic_mwaso_logo),
+                        painter = painterResource(id = R.drawable.img_app_icon),
                         contentDescription = "Mwaso Wami Logo",
-                        modifier = Modifier.size(60.dp).clip(CircleShape)
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.size(76.dp).clip(CircleShape)
                     )
                 }
 

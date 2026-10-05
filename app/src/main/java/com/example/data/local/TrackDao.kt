@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.example.data.model.AudioTrack
+import com.example.data.model.TrackUserData
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -31,11 +32,17 @@ interface TrackDao {
     @Query("SELECT * FROM audio_tracks WHERE id = :id LIMIT 1")
     suspend fun getTrackById(id: Long): AudioTrack?
 
+    @Query("SELECT id, isFavorite, playCount, lastPlayed, totalTimePlayedMs FROM audio_tracks")
+    suspend fun getAllTrackUserData(): List<TrackUserData>
+
     @Query("SELECT * FROM audio_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' OR album LIKE '%' || :query || '%' OR genre LIKE '%' || :query || '%'")
     fun searchTracks(query: String): Flow<List<AudioTrack>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTracks(tracks: List<AudioTrack>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTracksIgnore(tracks: List<AudioTrack>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrack(track: AudioTrack)

@@ -28,8 +28,11 @@ class MediaScanner(private val context: Context, private val database: AppDataba
 
     suspend fun scanAudio(forceRescan: Boolean = false): Int = withContext(Dispatchers.IO) {
         val trackDao = database.trackDao()
-        if (forceRescan) {
-            trackDao.clearScannedTracks()
+        // Do NOT call clearScannedTracks() so user favorites and play counts remain permanent!
+        val existingUserData = try {
+            trackDao.getAllTrackUserData().associateBy { it.id }
+        } catch (e: Exception) {
+            emptyMap()
         }
 
         var totalScanned = 0
@@ -89,6 +92,7 @@ class MediaScanner(private val context: Context, private val database: AppDataba
                     }
 
                     if (duration > 1000) { // filter out short notification sounds
+                        val userStats = existingUserData[id]
                         batch.add(
                             AudioTrack(
                                 id = id,
@@ -100,6 +104,10 @@ class MediaScanner(private val context: Context, private val database: AppDataba
                                 artworkUri = albumArtUri,
                                 genre = genre,
                                 dateAdded = dateAdded,
+                                playCount = userStats?.playCount ?: 0,
+                                lastPlayed = userStats?.lastPlayed ?: 0L,
+                                totalTimePlayedMs = userStats?.totalTimePlayedMs ?: 0L,
+                                isFavorite = userStats?.isFavorite ?: false,
                                 isSample = false
                             )
                         )

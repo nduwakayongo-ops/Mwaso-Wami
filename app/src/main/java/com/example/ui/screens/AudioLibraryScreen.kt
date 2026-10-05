@@ -103,9 +103,10 @@ fun AudioLibraryScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
-                        painter = painterResource(id = R.drawable.ic_mwaso_logo),
+                        painter = painterResource(id = R.drawable.img_app_icon),
                         contentDescription = "Mwaso Wami Logo",
-                        modifier = Modifier.size(36.dp).clip(CircleShape)
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -242,7 +243,13 @@ fun AudioLibraryScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "${tracks.size} faixas encontradas",
+                text = when (selectedSortOrder) {
+                    SortOrder.PLAY_COUNT -> "${tracks.size} faixas (da mais ouvida à menos ouvida)"
+                    SortOrder.RECENTLY_PLAYED -> "${tracks.size} faixas (tocadas recentemente)"
+                    SortOrder.ARTIST -> "${tracks.size} faixas (por artista)"
+                    SortOrder.GENRE -> "${tracks.size} faixas (por género)"
+                    SortOrder.TITLE_AZ -> "${tracks.size} faixas (A-Z)"
+                },
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

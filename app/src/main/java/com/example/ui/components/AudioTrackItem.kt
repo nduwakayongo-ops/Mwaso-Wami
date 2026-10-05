@@ -184,6 +184,16 @@ fun AudioTrackItem(
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
                     )
+                    if (track.playCount > 0) {
+                        Text(
+                            text = if (track.playCount == 1) " • 1x tocada" else " • ${track.playCount}x tocadas",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = GoldAccent
+                            )
+                        )
+                    }
                 }
             }
 

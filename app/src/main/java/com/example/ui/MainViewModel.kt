@@ -125,7 +125,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         playbackController.initRepository(repository)
         viewModelScope.launch(Dispatchers.IO) {
             val roomStart = System.currentTimeMillis()
-            repository.getOrCreateSettings()
+            val settings = repository.getOrCreateSettings()
+            _selectedSortOrder.value = settings.defaultSortOrder
             Log.d("PERF", "[PERF] Settings initialized in background: ${System.currentTimeMillis() - roomStart}ms")
             if (hasMediaPermission()) {
                 scanMedia(forceRescan = false)
@@ -168,6 +169,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSortOrder(sortOrder: SortOrder) {
         _selectedSortOrder.value = sortOrder
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = appSettings.value
+            repository.updateSettings(current.copy(defaultSortOrder = sortOrder))
+        }
     }
 
     fun setSearchQuery(query: String) {
@@ -198,7 +203,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(track: AudioTrack) {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.setFavorite(track.id, !track.isFavorite)
+            val newFav = !track.isFavorite
+            repository.setFavorite(track.id, newFav)
+            playbackController.updateFavorite(track.id, newFav)
         }
     }
 
