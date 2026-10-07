@@ -40,7 +40,7 @@ fun VideoLibraryScreen(
     videos: List<VideoItem>,
     isScanning: Boolean,
     onRefreshScan: () -> Unit,
-    onVideoClick: (VideoItem) -> Unit,
+    onVideoClick: (VideoItem, List<VideoItem>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -131,7 +131,7 @@ fun VideoLibraryScreen(
                 items(videos, key = { it.id }) { video ->
                     VideoGridItem(
                         video = video,
-                        onClick = { onVideoClick(video) }
+                        onClick = { onVideoClick(video, videos) }
                     )
                 }
             }

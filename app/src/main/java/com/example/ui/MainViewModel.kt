@@ -79,6 +79,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedVideo = MutableStateFlow<VideoItem?>(null)
     val selectedVideo: StateFlow<VideoItem?> = _selectedVideo.asStateFlow()
 
+    private val _videoPlaylist = MutableStateFlow<List<VideoItem>>(emptyList())
+    val videoPlaylist: StateFlow<List<VideoItem>> = _videoPlaylist.asStateFlow()
+
     private val _showSleepTimerDialog = MutableStateFlow(false)
     val showSleepTimerDialog: StateFlow<Boolean> = _showSleepTimerDialog.asStateFlow()
 
@@ -217,10 +220,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isFullPlayerOpen.value = false
     }
 
-    fun openVideo(video: VideoItem) {
+    fun openVideo(video: VideoItem, playlist: List<VideoItem> = emptyList()) {
         if (playbackState.value.isPlaying) {
             playbackController.togglePlayPause()
         }
+        _selectedVideo.value = video
+        _videoPlaylist.value = if (playlist.isNotEmpty()) playlist else videos.value
+    }
+
+    fun playNextVideo() {
+        val list = _videoPlaylist.value.ifEmpty { videos.value }
+        val current = _selectedVideo.value ?: return
+        val currentIndex = list.indexOfFirst { it.id == current.id }
+        if (currentIndex != -1 && currentIndex < list.size - 1) {
+            _selectedVideo.value = list[currentIndex + 1]
+        } else if (list.isNotEmpty()) {
+            _selectedVideo.value = list.first()
+        }
+    }
+
+    fun playPreviousVideo() {
+        val list = _videoPlaylist.value.ifEmpty { videos.value }
+        val current = _selectedVideo.value ?: return
+        val currentIndex = list.indexOfFirst { it.id == current.id }
+        if (currentIndex > 0) {
+            _selectedVideo.value = list[currentIndex - 1]
+        } else if (list.isNotEmpty()) {
+            _selectedVideo.value = list.last()
+        }
+    }
+
+    fun selectVideo(video: VideoItem) {
         _selectedVideo.value = video
     }
 

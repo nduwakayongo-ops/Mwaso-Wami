@@ -7,13 +7,13 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -39,11 +39,14 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +61,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +75,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -85,16 +88,31 @@ import com.example.ui.theme.GoldAccent
 import com.example.ui.theme.TerracottaAccent
 import kotlinx.coroutines.delay
 
+enum class VideoRepeatMode {
+    OFF,        // Transição sequencial para o próximo vídeo
+    REPEAT_ONE, // Repete o vídeo atual continuamente
+    REPEAT_ALL  // Repete a lista toda em loop contínuo
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPlayerScreen(
     video: VideoItem,
+    playlist: List<VideoItem> = emptyList(),
     gesturesEnabled: Boolean,
+    onNextVideo: (() -> Unit)? = null,
+    onPreviousVideo: (() -> Unit)? = null,
+    onSelectVideo: ((VideoItem) -> Unit)? = null,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
+
+    // Android System Back Button Handler
+    BackHandler {
+        onClose()
+    }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -113,11 +131,56 @@ fun VideoPlayerScreen(
     var resizeMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var showSpeedMenu by remember { mutableStateOf(false) }
+    var repeatMode by remember { mutableStateOf(VideoRepeatMode.OFF) }
 
     var gestureFeedbackText by remember { mutableStateOf<String?>(null) }
     var gestureFeedbackIcon by remember { mutableStateOf<androidx.compose.ui.graphics.vector.ImageVector?>(null) }
 
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+
+    val effectivePlaylist = remember(playlist, video) {
+        if (playlist.isNotEmpty()) playlist else listOf(video)
+    }
+    val currentIndex = remember(effectivePlaylist, video) {
+        effectivePlaylist.indexOfFirst { it.id == video.id }.coerceAtLeast(0)
+    }
+    val hasNext = currentIndex < effectivePlaylist.size - 1 || repeatMode == VideoRepeatMode.REPEAT_ALL
+    val hasPrevious = currentIndex > 0 || repeatMode == VideoRepeatMode.REPEAT_ALL
+
+    val currentRepeatMode by rememberUpdatedState(repeatMode)
+    val currentOnNext by rememberUpdatedState(onNextVideo)
+    val currentOnPrevious by rememberUpdatedState(onPreviousVideo)
+    val currentOnSelect by rememberUpdatedState(onSelectVideo)
+
+    val handleNext: () -> Unit = {
+        if (currentIndex < effectivePlaylist.size - 1) {
+            currentOnNext?.invoke()
+        } else if (currentRepeatMode == VideoRepeatMode.REPEAT_ALL && effectivePlaylist.isNotEmpty()) {
+            currentOnSelect?.invoke(effectivePlaylist.first())
+        }
+    }
+
+    val handlePrevious: () -> Unit = {
+        if (currentPositionMs > 3000L) {
+            exoPlayer.seekTo(0)
+        } else if (currentIndex > 0) {
+            currentOnPrevious?.invoke()
+        } else if (currentRepeatMode == VideoRepeatMode.REPEAT_ALL && effectivePlaylist.isNotEmpty()) {
+            currentOnSelect?.invoke(effectivePlaylist.last())
+        } else {
+            exoPlayer.seekTo(0)
+        }
+    }
+
+    // React to video changes (e.g. Next / Previous transition)
+    LaunchedEffect(video.id) {
+        val uri = Uri.parse(video.mediaUri)
+        exoPlayer.setMediaItem(MediaItem.fromUri(uri))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+        currentPositionMs = 0L
+        durationMs = video.durationMs
+    }
 
     // Keep screen on during video playback
     DisposableEffect(Unit) {
@@ -128,7 +191,16 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Player position ticker
+    // Configure ExoPlayer Repeat Mode
+    LaunchedEffect(repeatMode) {
+        exoPlayer.repeatMode = if (repeatMode == VideoRepeatMode.REPEAT_ONE) {
+            Player.REPEAT_MODE_ONE
+        } else {
+            Player.REPEAT_MODE_OFF
+        }
+    }
+
+    // Player position ticker and state listener
     LaunchedEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -139,6 +211,33 @@ fun VideoPlayerScreen(
                 if (state == Player.STATE_READY) {
                     val d = exoPlayer.duration
                     if (d > 0) durationMs = d
+                } else if (state == Player.STATE_ENDED) {
+                    when (currentRepeatMode) {
+                        VideoRepeatMode.REPEAT_ONE -> {
+                            exoPlayer.seekTo(0)
+                            exoPlayer.play()
+                        }
+                        VideoRepeatMode.REPEAT_ALL -> {
+                            if (currentIndex < effectivePlaylist.size - 1) {
+                                gestureFeedbackText = "Próximo vídeo..."
+                                gestureFeedbackIcon = Icons.Default.SkipNext
+                                currentOnNext?.invoke()
+                            } else if (effectivePlaylist.isNotEmpty()) {
+                                gestureFeedbackText = "Reiniciando lista..."
+                                gestureFeedbackIcon = Icons.Default.Repeat
+                                currentOnSelect?.invoke(effectivePlaylist.first())
+                            }
+                        }
+                        VideoRepeatMode.OFF -> {
+                            if (currentIndex < effectivePlaylist.size - 1) {
+                                gestureFeedbackText = "Próximo vídeo..."
+                                gestureFeedbackIcon = Icons.Default.SkipNext
+                                currentOnNext?.invoke()
+                            } else {
+                                isPlaying = false
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -150,7 +249,7 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Auto-hide controls after 4 seconds
+    // Auto-hide controls after 4.5 seconds
     LaunchedEffect(showControls, isLocked) {
         if (showControls && !isLocked) {
             delay(4500)
@@ -166,11 +265,7 @@ fun VideoPlayerScreen(
             .pointerInput(isLocked, gesturesEnabled) {
                 detectTapGestures(
                     onTap = {
-                        if (isLocked) {
-                            showControls = !showControls
-                        } else {
-                            showControls = !showControls
-                        }
+                        showControls = !showControls
                     },
                     onDoubleTap = { offset ->
                         if (!isLocked && gesturesEnabled) {
@@ -237,7 +332,7 @@ fun VideoPlayerScreen(
         // Gesture Feedback HUD Toast
         LaunchedEffect(gestureFeedbackText) {
             if (gestureFeedbackText != null) {
-                delay(1200)
+                delay(1300)
                 gestureFeedbackText = null
                 gestureFeedbackIcon = null
             }
@@ -248,7 +343,7 @@ fun VideoPlayerScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.75f))
+                    .background(Color.Black.copy(alpha = 0.8f))
                     .padding(horizontal = 20.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -315,7 +410,7 @@ fun VideoPlayerScreen(
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                Color.Black.copy(alpha = 0.7f),
+                                Color.Black.copy(alpha = 0.75f),
                                 Color.Transparent,
                                 Color.Black.copy(alpha = 0.85f)
                             )
@@ -341,19 +436,68 @@ fun VideoPlayerScreen(
                         )
                     }
 
-                    Text(
-                        text = video.title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        ),
-                        maxLines = 1,
+                    Column(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 8.dp)
-                    )
+                    ) {
+                        Text(
+                            text = video.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            ),
+                            maxLines = 1
+                        )
+                        if (effectivePlaylist.size > 1) {
+                            Text(
+                                text = "Vídeo ${currentIndex + 1} de ${effectivePlaylist.size}",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 11.sp
+                                )
+                            )
+                        }
+                    }
 
-                    // 🔒 Lock Button (Spec #20)
+                    // 🔁 Repeat Mode Button
+                    IconButton(
+                        onClick = {
+                            repeatMode = when (repeatMode) {
+                                VideoRepeatMode.OFF -> VideoRepeatMode.REPEAT_ONE
+                                VideoRepeatMode.REPEAT_ONE -> VideoRepeatMode.REPEAT_ALL
+                                VideoRepeatMode.REPEAT_ALL -> VideoRepeatMode.OFF
+                            }
+                            when (repeatMode) {
+                                VideoRepeatMode.OFF -> {
+                                    gestureFeedbackText = "Repetição: Desativada (Próximo automático)"
+                                    gestureFeedbackIcon = Icons.Default.Repeat
+                                }
+                                VideoRepeatMode.REPEAT_ONE -> {
+                                    gestureFeedbackText = "Repetição: Este vídeo"
+                                    gestureFeedbackIcon = Icons.Default.RepeatOne
+                                }
+                                VideoRepeatMode.REPEAT_ALL -> {
+                                    gestureFeedbackText = "Repetição: Toda a lista"
+                                    gestureFeedbackIcon = Icons.Default.Repeat
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("video_repeat_button")
+                    ) {
+                        val (icon, tint) = when (repeatMode) {
+                            VideoRepeatMode.OFF -> Pair(Icons.Default.Repeat, Color.White.copy(alpha = 0.6f))
+                            VideoRepeatMode.REPEAT_ONE -> Pair(Icons.Default.RepeatOne, AmberPrimary)
+                            VideoRepeatMode.REPEAT_ALL -> Pair(Icons.Default.Repeat, AmberPrimary)
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = "Modo de Repetição",
+                            tint = tint
+                        )
+                    }
+
+                    // 🔒 Lock Button
                     IconButton(
                         onClick = { isLocked = true },
                         modifier = Modifier.testTag("lock_video_screen_button")
@@ -420,22 +564,42 @@ fun VideoPlayerScreen(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // ⏮ Previous Video Button
+                    IconButton(
+                        onClick = handlePrevious,
+                        enabled = hasPrevious || currentPositionMs > 3000L,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("video_previous_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipPrevious,
+                            contentDescription = "Vídeo Anterior",
+                            tint = if (hasPrevious || currentPositionMs > 3000L) Color.White else Color.White.copy(alpha = 0.35f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // -10s Rewind
                     IconButton(
                         onClick = {
                             exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
                         },
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.FastRewind,
                             contentDescription = "-10s",
                             tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(24.dp))
+                    Spacer(modifier = Modifier.width(14.dp))
 
+                    // Play/Pause Button
                     Box(
                         modifier = Modifier
                             .size(64.dp)
@@ -445,6 +609,9 @@ fun VideoPlayerScreen(
                                 if (exoPlayer.isPlaying) {
                                     exoPlayer.pause()
                                 } else {
+                                    if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                                        exoPlayer.seekTo(0)
+                                    }
                                     exoPlayer.play()
                                 }
                             }
@@ -459,18 +626,37 @@ fun VideoPlayerScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(24.dp))
+                    Spacer(modifier = Modifier.width(14.dp))
 
+                    // +10s Fast Forward
                     IconButton(
                         onClick = {
                             exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(durationMs))
                         },
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.FastForward,
                             contentDescription = "+10s",
                             tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // ⏭ Next Video Button
+                    IconButton(
+                        onClick = handleNext,
+                        enabled = hasNext,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("video_next_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Próximo Vídeo",
+                            tint = if (hasNext) Color.White else Color.White.copy(alpha = 0.35f),
                             modifier = Modifier.size(32.dp)
                         )
                     }

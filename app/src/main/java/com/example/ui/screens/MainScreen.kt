@@ -185,7 +185,7 @@ fun MainScreen(
                             videos = videos,
                             isScanning = isScanning,
                             onRefreshScan = { viewModel.scanMedia(forceRescan = true) },
-                            onVideoClick = { viewModel.openVideo(it) }
+                            onVideoClick = { video, list -> viewModel.openVideo(video, list) }
                         )
                     }
                     2 -> {
@@ -274,9 +274,14 @@ fun MainScreen(
 
                 // Video Player Screen Overlay
                 selectedVideo?.let { currentVideo ->
+                    val videoPlaylist by viewModel.videoPlaylist.collectAsStateWithLifecycle()
                     VideoPlayerScreen(
                         video = currentVideo,
+                        playlist = videoPlaylist,
                         gesturesEnabled = appSettings.gesturesEnabled,
+                        onNextVideo = { viewModel.playNextVideo() },
+                        onPreviousVideo = { viewModel.playPreviousVideo() },
+                        onSelectVideo = { viewModel.selectVideo(it) },
                         onClose = { viewModel.closeVideo() },
                         modifier = Modifier.fillMaxSize()
                     )
